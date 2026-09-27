@@ -1,0 +1,4 @@
+# 本脚本会用到的 adb 相关二进制: 由 adb-setup.ps1 自动下载, 不应入库
+/platform-tools/
+/platform-tools.zip
+*.apk

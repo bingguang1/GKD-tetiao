@@ -63,7 +63,8 @@
 | 10 | `app/src/main/kotlin/li/songe/gkd/App.kt` | `commitUrl` 由上游仓库改为本仓库 | 原值指向不存在的上游 commit，点击必然 404 |
 | 11 | `app/src/main/kotlin/li/songe/gkd/util/Constants.kt` | `REPOSITORY_URL` / `ISSUES_URL` / `HOME_PAGE_URL` 改为本仓库；新增 `RELEASES_URL`；移除 `PLAY_STORE_URL` | 原值使用户把 fork 的问题提交到上游、并跳转官方 Play 商店页 |
 | 12 | `app/src/main/kotlin/li/songe/gkd/ui/AboutPage.kt` | 分享面板 `Google Play` 项改为 `GitHub Releases`，改用 `RELEASES_URL` | 本 fork 无 Play 分发 |
-| 13 | `app/src/main/assets/firstrun/gkd-backup.zip` | 移除第三方订阅 `subscription/1.json`（梦念逍遥のGKD订阅，285 应用 / 874 组）及其在 `db.json` 中的引用；清空个人化的 App 名单与计数 | 第三方内容版权属其作者，不宜随本仓库二次分发；且原内容含开发者个人使用数据 |
+| 13 | `app/src/main/assets/firstrun/gkd-backup.zip` | **不打包第三方订阅正文**，改为预置订阅链接（`db.json` 中 `subsItems` 的 `updateUrl` 指向作者自己的发布渠道），由 App 首启自动拉取；清空个人化的 App 名单与计数 | 第三方订阅仓库无 LICENSE 声明，复制全文属转载；只预置链接既能"开箱即用"，又不构成二次分发，且用户始终拿到作者最新规则 |
+| 17 | `adb-tools/adb-setup.bat` + `adb-setup.ps1` | 新增一键 ADB 配置工具（权限/appops/无障碍/电池白名单） | 降低使用门槛；命令与 App 内置授权页 `AuthA11yPage.kt` 的 `gkdStartCommandText` 保持一致 |
 | 14 | `.gitignore` / `.gitattributes` | 补齐日志、产物、签名物料忽略规则；统一换行符 | 防止密钥与构建残留入库 |
 | 15 | `.github/workflows/*` | 移除对上游 Secrets 的依赖、删除 Play 渠道相关步骤、替换已归档的 `create-release@v1` / `upload-release-asset@v1`、收敛触发条件 | 上游 Secrets 在本仓库不存在 → 每次 push 必然失败 |
 | 16 | `README.md` / `NOTICE.md` / `.github/*` | 重写为 fork 身份，去掉上游官方下载入口与赞助入口；新增本修改声明 | GPL-3.0 §5(a) 合规；避免用户误认为官方版本 |

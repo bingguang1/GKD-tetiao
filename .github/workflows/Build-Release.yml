@@ -44,16 +44,20 @@ jobs:
       - run: ./gradlew app:assembleGkdRelease
 
       # 产物重命名: 默认名 app-gkd-release.apk 无法区分渠道, 改成带仓库标识与标签名的名字
-      - name: 重命名 APK
+      # 同时打包 adb-tools(一键 ADB 配置), 与 APK 一起发布
+      - name: 准备发布产物
         run: |
           mkdir -p dist
           cp app/build/outputs/apk/gkd/release/*.apk "dist/gkd-tejiao-${{ github.ref_name }}.apk"
+          cd adb-tools
+          zip -r "../dist/gkd-tejiao-adb-tools.zip" adb-setup.bat adb-setup.ps1 README.md -x 'platform-tools/*'
+          cd ..
           ls -l dist
 
       - uses: actions/upload-artifact@v7
         with:
-          name: apk
-          path: dist/*.apk
+          name: dist
+          path: dist/*
 
   release:
     needs: build
@@ -65,13 +69,13 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          name: apk
-          path: apk
+          name: dist
+          path: dist
 
       - name: 列出产物
-        run: ls -l apk
+        run: ls -l dist
 
-      - name: 创建 Release 并上传 APK
+      - name: 创建 Release 并上传 APK 与 ADB 工具
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -83,11 +87,11 @@ jobs:
           esac
           # 幂等: 已存在同名 Release 时改为补传资产, 避免重跑失败
           if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
-            gh release upload "${{ github.ref_name }}" apk/*.apk --clobber
+            gh release upload "${{ github.ref_name }}" dist/* --clobber
           else
             gh release create "${{ github.ref_name }}" \
               --title "GKD 特调版 ${{ github.ref_name }}" \
               --notes-file CHANGELOG.md \
               $PRERELEASE \
-              apk/*.apk
+              dist/*
           fi

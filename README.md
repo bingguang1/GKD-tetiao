@@ -59,17 +59,20 @@
 
 ---
 
-## 首次运行不再预置第三方订阅
+## 开箱即用：内置订阅（首次启动自动加载）
 
-本 fork 早期版本的内置配置里打包了第三方作者的完整订阅
-（[梦念逍遥のGKD订阅](https://github.com/MengNianxiaoyao/gkd-subscription)，285 个应用 / 874 个规则组）。
-该内容版权属于其作者，**不宜随本仓库二次分发**，现已移除。
+本 fork 的出厂配置里**预置了 [梦念逍遥のGKD订阅](https://github.com/MengNianxiaoyao/gkd-subscription)**，
+**首次启动会自动联网拉取规则**，不需要你手动添加订阅。
 
-**订阅需要你自己添加**：
+> **实现说明（重要）**：仓库里**不打包**该订阅的规则正文（642 KB），只预置订阅链接，
+> 由 App 从**作者自己的发布渠道**（`registry.npmmirror.com/gkd-subscription`）拉取。
+> 这样既做到"下载即用"，又不构成对第三方内容的二次分发；
+> 而且用户拿到的**永远是作者的最新规则**——内置快照在首次联网时本来就会被在线版本整体覆盖。
+> 该订阅的版权归其作者所有，本仓库只提供链接。
 
-1. 打开 GKD → 订阅 → 右上角 `+` → 输入订阅链接
-2. 第三方订阅列表：<https://github.com/topics/gkd-subscription>
-3. 也可用 [subscription-template](https://github.com/gkd-kit/subscription-template) 自建
+- 首次启动**需要联网**；若那时没网，App 会按每日间隔自动重试，也可在订阅页下拉手动刷新
+- 想再加别的订阅：订阅 → 右上角 `+` → 粘贴订阅链接；
+  第三方订阅列表见 <https://github.com/topics/gkd-subscription>
 
 ---
 
@@ -104,6 +107,27 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 ```
 
 > 签名密钥一旦丢失，你将**无法**给已安装的用户推送升级，请务必备份。
+
+---
+
+## 一键 ADB 配置（推荐）
+
+装完 App 后需要授予若干权限，一个个点很麻烦。用数据线连上电脑，运行
+`adb-tools/adb-setup.bat` 即可一次配好：
+
+- 授予 `WRITE_SECURE_SETTINGS`、`GET_APP_OPS_STATS`、通知 权限
+- 解除 6 项系统操作限制（appops）：`POST_NOTIFICATION`、`SYSTEM_ALERT_WINDOW`、
+  `ACCESS_ACCESSIBILITY`、`ACCESS_RESTRICTED_SETTINGS`、`FOREGROUND_SERVICE_SPECIAL_USE`、
+  `CREATE_ACCESSIBILITY_OVERLAY`
+- **自动开启无障碍服务**（免去在设置里翻找，且不会关掉你已启用的其它无障碍服务）
+- 加入电池优化白名单、触发一次状态同步
+
+脚本会自动查找 adb（脚本目录 → PATH → 常见 SDK 路径），找不到时从 Google 官方地址下载
+platform-tools。**命令清单与 App 内置授权页完全一致**（源码依据：`AuthA11yPage.kt` 的 `gkdStartCommandText`）。
+
+> 用法：把 `gkd-tejiao-<版本>.apk` 与 `adb-tools` 里的两个文件放同一目录，双击 `adb-setup.bat`；
+> 手机需开启「开发者选项 → USB 调试」并在弹窗里允许。
+> 部分 ROM（小米/华为/OPPO/vivo）会拦截 adb 修改无障碍，脚本会提示改用手动开启。
 
 ---
 
