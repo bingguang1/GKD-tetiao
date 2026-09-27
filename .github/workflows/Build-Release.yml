@@ -1,0 +1,86 @@
+name: Build-Release
+
+# 推 v* 标签时构建并发布 APK。
+# 相对上游的改动:
+#   1) 删除 Play 渠道相关的一切(上游为 Google Play 准备, 本 fork 不上架 Play)
+#   2) 不再依赖上游的 Secrets —— 上游那 5 个 Secret 在本仓库不存在, 展开为空串后会生成
+#      0 字节的 keystore, 导致 app/build.gradle.kts 的 hasProperty("GKD_STORE_FILE") 恒为真、
+#      构建必然失败。改为"未配置签名时自动回退到 debug 签名"。
+#   3) 用 gh CLI 创建 Release, 替换已被官方归档的 actions/create-release@v1 与 upload-release-asset@v1
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      # 可选: 配置你自己的签名(不配置则使用 debug 签名, APK 同样可直接安装)。
+      # 仓库 Settings -> Secrets and variables -> Actions 添加这 4 个 Secret 后, 取消下面注释:
+      #
+      # - name: write signing secrets
+      #   run: |
+      #     echo "${{ secrets.GKD_STORE_FILE_BASE64 }}" | base64 --decode > ${{ github.workspace }}/release.jks
+      #     echo "GKD_STORE_FILE=${{ github.workspace }}/release.jks" >> gradle.properties
+      #     echo "GKD_STORE_PASSWORD=${{ secrets.GKD_STORE_PASSWORD }}" >> gradle.properties
+      #     echo "GKD_KEY_ALIAS=${{ secrets.GKD_KEY_ALIAS }}" >> gradle.properties
+      #     echo "GKD_KEY_PASSWORD=${{ secrets.GKD_KEY_PASSWORD }}" >> gradle.properties
+
+      - run: chmod +x ./gradlew
+      - run: ./gradlew app:assembleGkdRelease
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: apk
+          path: app/build/outputs/apk/gkd/release/*.apk
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: apk
+          path: apk
+
+      - name: 列出产物
+        run: ls -l apk
+
+      - name: 创建 Release 并上传 APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -e
+          PRERELEASE=""
+          case "${{ github.ref_name }}" in
+            *beta*|*alpha*|*rc*) PRERELEASE="--prerelease" ;;
+          esac
+          # 幂等: 已存在同名 Release 时改为补传资产, 避免重跑失败
+          if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
+            gh release upload "${{ github.ref_name }}" apk/*.apk --clobber
+          else
+            gh release create "${{ github.ref_name }}" \
+              --title "GKD 特调版 ${{ github.ref_name }}" \
+              --notes-file CHANGELOG.md \
+              $PRERELEASE \
+              apk/*.apk
+          fi

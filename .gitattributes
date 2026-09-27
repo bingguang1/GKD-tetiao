@@ -1,0 +1,35 @@
+# 统一换行符: 仓库内一律 LF, 避免 Windows 提交后在 Linux CI 上 shell 脚本/ Gradle Wrapper 失效
+* text=auto eol=lf
+
+# Gradle Wrapper 的可执行脚本必须是 LF
+gradlew text eol=lf
+# Windows 批处理必须是 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制(禁止换行符转换)
+*.jar binary
+*.jks binary
+*.keystore binary
+*.p12 binary
+*.pfx binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.zip binary
+*.apk binary
+*.aab binary
+*.so binary
+
+# 语言与生成物统计
+*.kt text
+*.kts text
+*.md text
+*.yml text
+*.yaml text
+*.json text
+*.json5 text
+*.xml text
+*.pro text

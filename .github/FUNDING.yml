@@ -1,0 +1,8 @@
+# 本 fork 不接受赞助, 因此不配置任何赞助入口。
+#
+# 说明: 原文件为上游的 `custom: ['https://github.com/lisonge/sponsor']`。
+# 那会让 GitHub 在本仓库页面显示 Sponsor 按钮, 把赞助流量导向上游作者,
+# 同时让人误以为本仓库与上游是同一主体 —— 因此已移除。
+#
+# 如果你想支持 GKD 这个项目本身, 请直接前往上游:
+#   https://github.com/lisonge/sponsor

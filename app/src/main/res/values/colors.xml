@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="better_white">#FCFCFC</color>
+    <color name="better_black">#111111</color>
+    <color name="ic_launcher_background_tint">@color/better_white</color>
+    <color name="ic_launcher_foreground_tint">@color/better_black</color>
+    <!-- fork(v97): 桌面小组件 -->
+    <color name="widget_bg">#E6121826</color>
+    <color name="widget_title">#FFFFFFFF</color>
+    <color name="widget_status_on">#7CE7A0</color>
+    <color name="widget_status_off">#FFE0E0E0</color>
+</resources>

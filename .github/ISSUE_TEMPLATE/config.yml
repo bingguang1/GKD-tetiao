@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: GKD 应用本体的问题 / 上游讨论区
+    url: https://github.com/gkd-kit/gkd/discussions
+    about: '本仓库是 GKD 的非官方修改版(fork)。若问题出在 GKD 本体的选择器/规则/订阅/无障碍机制上, 请前往上游讨论区; 本 fork 特有的改动问题请直接开 issue。'

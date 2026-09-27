@@ -1,0 +1,62 @@
+name: Build-Apk
+
+# 触发条件说明(相对上游已收紧):
+#   上游是 push 到**任意分支**都触发完整 release 构建(单次 4~7 分钟), 在一个新仓库里代价过高。
+#   改为: 仅 main 分支 + 手动触发; 并用 concurrency 取消同一分支上的旧运行。
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'LICENSE'
+      - '*.md'
+      - '.github/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore:') && !startsWith(github.event.head_commit.message, 'chore(') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      # 可选: 配置你自己的签名密钥(不配置则自动回退到 debug 签名, 产物同样可直接安装)
+      # 使用方法: 仓库 Settings -> Secrets and variables -> Actions 添加以下 4 个 Secret,
+      #           GKD_STORE_FILE_BASE64 为 keystore 的 base64 文本:
+      #           [Convert]::ToBase64String([IO.File]::ReadAllBytes("your.jks")) | Set-Clipboard
+      # 然后取消下面这段注释即可。**切勿**把密钥提交进仓库。
+      #
+      # - name: write signing secrets
+      #   run: |
+      #     echo "${{ secrets.GKD_STORE_FILE_BASE64 }}" | base64 --decode > ${{ github.workspace }}/release.jks
+      #     echo "GKD_STORE_FILE=${{ github.workspace }}/release.jks" >> gradle.properties
+      #     echo "GKD_STORE_PASSWORD=${{ secrets.GKD_STORE_PASSWORD }}" >> gradle.properties
+      #     echo "GKD_KEY_ALIAS=${{ secrets.GKD_KEY_ALIAS }}" >> gradle.properties
+      #     echo "GKD_KEY_PASSWORD=${{ secrets.GKD_KEY_PASSWORD }}" >> gradle.properties
+
+      - run: echo GKD_RENAME_APK_FLAG=1 >> gradle.properties
+
+      - run: chmod +x ./gradlew
+      - run: ./gradlew app:assembleGkdRelease
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gkd-tejiao-release-apk
+          path: app/build/outputs/apk/gkd/release/*.apk
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: outputs
+          path: app/build/outputs
