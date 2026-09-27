@@ -43,10 +43,17 @@ jobs:
       - run: chmod +x ./gradlew
       - run: ./gradlew app:assembleGkdRelease
 
+      # 产物重命名: 默认名 app-gkd-release.apk 无法区分渠道, 改成带仓库标识与标签名的名字
+      - name: 重命名 APK
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/gkd/release/*.apk "dist/gkd-tejiao-${{ github.ref_name }}.apk"
+          ls -l dist
+
       - uses: actions/upload-artifact@v7
         with:
           name: apk
-          path: app/build/outputs/apk/gkd/release/*.apk
+          path: dist/*.apk
 
   release:
     needs: build
