@@ -21,9 +21,11 @@ import li.songe.gkd.util.stopServiceByClass
 class ButtonService : OverlayWindowService(
     positionKey = "button"
 ) {
-    override fun onClickView() = appScope.launchTry {
-        SnapshotExt.captureSnapshot()
-    }.let { }
+    override fun onClickView() {
+        appScope.launchTry {
+            SnapshotExt.captureSnapshot()
+        }
+    }
 
     override fun onLongClickView() = stopSelf()
 

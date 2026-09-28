@@ -36,14 +36,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.colorResource
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
@@ -213,15 +209,13 @@ fun AboutPage() {
                     mainVm.openUrl(REPOSITORY_URL)
                 },
             )
-            if (META.isGkdChannel) {
-                SettingItem(
-                    imageVector = null,
-                    title = "捐赠支持",
-                    onClick = {
-                        mainVm.navigateWebPage(ShortUrlSet.URL10)
-                    },
-                )
-            }
+            SettingItem(
+                imageVector = null,
+                title = "捐赠支持",
+                onClick = {
+                    mainVm.navigateWebPage(ShortUrlSet.URL10)
+                },
+            )
             SettingItem(
                 imageVector = null,
                 title = "使用协议",
@@ -338,23 +332,9 @@ fun AboutPage() {
             onDismiss = { showShareAppDlg = false },
             textList = listOf(
                 "分享到其他应用" to mainVm.viewModelScope.launchAsFn(Dispatchers.IO) {
-                    if (!META.isGkdChannel) {
-                        mainVm.dialogFlow.waitResult(
-                            title = "分享提示",
-                            textContent = { Text(text = exportPlayTipTemplate()) },
-                            confirmText = "继续",
-                        )
-                    }
                     context.shareFile(getShareApkFile(), "分享安装文件")
                 },
                 "保存到下载" to mainVm.viewModelScope.launchAsFn(Dispatchers.IO) {
-                    if (!META.isGkdChannel) {
-                        mainVm.dialogFlow.waitResult(
-                            title = "保存提示",
-                            textContent = { Text(text = exportPlayTipTemplate()) },
-                            confirmText = "继续",
-                        )
-                    }
                     context.saveFileToDownloads(getShareApkFile())
                 },
                 "GitHub Releases" to {
@@ -362,27 +342,6 @@ fun AboutPage() {
                 },
             )
         )
-    }
-}
-
-@Composable
-private fun exportPlayTipTemplate(): AnnotatedString {
-    return buildAnnotatedString {
-        append("当前导出的 APK 文件只能在已安装 Google 框架的设备上才能使用，否则安装打开后会提示报错，")
-        withLink(
-            LinkAnnotation.Url(
-                ShortUrlSet.URL13,
-                TextLinkStyles(
-                    style = SpanStyle(
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                )
-            )
-        ) {
-            append("建议点此从官网下载")
-        }
-        append("，或点击下方继续操作")
     }
 }
 

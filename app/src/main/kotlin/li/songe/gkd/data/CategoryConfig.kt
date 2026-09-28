@@ -40,9 +40,6 @@ data class CategoryConfig(
         @Delete
         suspend fun delete(vararg objects: CategoryConfig): Int
 
-        @Query("DELETE FROM category_config WHERE subs_id=:subsItemId")
-        suspend fun deleteBySubsItemId(subsItemId: Long): Int
-
         @Query("DELETE FROM category_config WHERE subs_id IN (:subsIds)")
         suspend fun deleteBySubsId(vararg subsIds: Long): Int
 

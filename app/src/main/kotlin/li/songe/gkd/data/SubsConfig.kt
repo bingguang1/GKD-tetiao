@@ -122,9 +122,6 @@ data class SubsConfig(
         @Query("SELECT * FROM subs_config WHERE type=${AppGroupType} AND app_id=:appId AND subs_id IN (:subsItemIds)")
         fun queryAppConfig(subsItemIds: List<Long>, appId: String): Flow<List<SubsConfig>>
 
-        @Query("SELECT * FROM subs_config WHERE type=${GlobalGroupType} AND subs_id IN (:subsItemIds)")
-        fun queryGlobalConfig(subsItemIds: List<Long>): Flow<List<SubsConfig>>
-
         @Query("SELECT * FROM subs_config WHERE type=${GlobalGroupType} AND subs_id IN (SELECT si.id FROM subs_item si WHERE si.enable = 1)")
         fun queryUsedGlobalConfig(): Flow<List<SubsConfig>>
 

@@ -78,22 +78,24 @@ class UpdateStatus(val scope: CoroutineScope) {
 
     val canRecheck get() = System.currentTimeMillis() - lastCheckTime > 1.days.inWholeMilliseconds
 
-    fun checkUpdate(manual: Boolean = false) = scope.launchTry(Dispatchers.IO, silent = !manual) {
-        lastManual = manual
-        checkUpdatingMutex.whenUnLock {
-            lastCheckTime = System.currentTimeMillis()
-            if (!NetworkUtils.isAvailable()) {
-                error("网络不可用")
+    fun checkUpdate(manual: Boolean = false) {
+        scope.launchTry(Dispatchers.IO, silent = !manual) {
+            lastManual = manual
+            checkUpdatingMutex.whenUnLock {
+                lastCheckTime = System.currentTimeMillis()
+                if (!NetworkUtils.isAvailable()) {
+                    error("网络不可用")
+                }
+                val newVersion = client.get(UPDATE_URL).body<NewVersion>()
+                if (newVersion.versionCode <= META.versionCode) {
+                    if (manual) toast("暂无更新")
+                    return@launchTry
+                }
+                if (!manual && ignoreVersionListFlow.value.contains(newVersion.versionCode)) return@launchTry
+                newVersionFlow.value = newVersion
             }
-            val newVersion = client.get(UPDATE_URL).body<NewVersion>()
-            if (newVersion.versionCode <= META.versionCode) {
-                if (manual) toast("暂无更新")
-                return@launchTry
-            }
-            if (!manual && ignoreVersionListFlow.value.contains(newVersion.versionCode)) return@launchTry
-            newVersionFlow.value = newVersion
         }
-    }.let { }
+    }
 
     private fun startDownload(newVersion: NewVersion) {
         if (downloadStatusFlow.value is LoadStatus.Loading) return

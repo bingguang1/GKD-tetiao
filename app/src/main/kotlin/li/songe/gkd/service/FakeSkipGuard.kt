@@ -1,6 +1,5 @@
 package li.songe.gkd.service
 
-import android.content.Intent
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -9,7 +8,6 @@ import li.songe.gkd.a11y.A11yRuleEngine
 import li.songe.gkd.a11y.TopActivity
 import li.songe.gkd.a11y.launcherAppId
 import li.songe.gkd.a11y.topActivityFlow
-import li.songe.gkd.app
 import li.songe.gkd.appScope
 import li.songe.gkd.data.ActionResult
 import li.songe.gkd.data.ResolvedRule
@@ -43,6 +41,7 @@ import java.util.concurrent.atomic.AtomicLong
  * 本模块的返回键**不是兜底**, 而是"已经证实跳到了别的应用"这一确定性条件下的回退, 语义不同。
  */
 
+private const val LOG_TAG = "FakeSkipGuard"  // 日志/共用工具(GuardUtils)里区分调用方
 private const val VERIFY_DELAY = 1200L      // 点击后多久校验落点
 private const val BACK_WAIT = 600L          // 返回键之后的观察时间
 private const val RELAUNCH_WAIT = 900L      // 拉起原 App 之后的观察时间
@@ -87,7 +86,7 @@ object FakeSkipGuard {
 
     fun clearVetoApps() {
         storeFlow.value = storeFlow.value.copy(fakeSkipVetoApps = "")
-        LogUtils.d("FakeSkipGuard clear-veto")
+        LogUtils.d("$LOG_TAG clear-veto")
     }
 
     // ---------------- 闸 A: 点前否决 ----------------
@@ -112,7 +111,7 @@ object FakeSkipGuard {
         if (now - lastLog >= VETO_LOG_INTERVAL_MS) {
             lastVetoLogTime[appId] = now
             LogUtils.d(
-                "FakeSkipGuard veto pkg=$appId text=${label(node)} bounds=${nodeBounds(node)}"
+                "$LOG_TAG veto pkg=$appId text=${label(node)} bounds=${nodeBounds(node)}"
             )
         }
         showVetoToast(appId)
@@ -156,7 +155,7 @@ object FakeSkipGuard {
         val pkgAfter = after.appId
         if (pkgAfter == pkgBefore) {
             LogUtils.d(
-                "FakeSkipGuard ok pkg=$pkgBefore activity=${after.activityId} before=${activityBefore ?: ""} target=$target"
+                "$LOG_TAG ok pkg=$pkgBefore activity=${after.activityId} before=${activityBefore ?: ""} target=$target"
             )
             return
         }
@@ -165,90 +164,57 @@ object FakeSkipGuard {
             val n = (leftSystemCount[pkgBefore] ?: 0) + 1
             leftSystemCount[pkgBefore] = n
             LogUtils.d(
-                "FakeSkipGuard left-system pkg=$pkgBefore -> ${pkgAfter.ifEmpty { "null" }} count=$n target=$target"
+                "$LOG_TAG left-system pkg=$pkgBefore -> ${pkgAfter.ifEmpty { "null" }} count=$n target=$target"
             )
             if (n >= LEFT_SYSTEM_LIMIT) {
                 markMisclick(pkgBefore, reason = "left-system", toastEnabled = true)
                 // 判定成立时才把用户带回原 App(单次可能只是用户自己按了 Home, 不抢)
-                val ok = relaunchApp(pkgBefore)
-                LogUtils.d("FakeSkipGuard left-system relaunch=$ok pkg=$pkgBefore")
+                val ok = relaunchApp(pkgBefore, LOG_TAG)
+                LogUtils.d("$LOG_TAG left-system relaunch=$ok pkg=$pkgBefore")
             }
             return
         }
         // 跳到别的应用 → 假跳过误点
         lastHandleTime = now
-        LogUtils.d("FakeSkipGuard misclick pkg=$pkgBefore -> $pkgAfter target=$target, send BACK")
+        LogUtils.d("$LOG_TAG misclick pkg=$pkgBefore -> $pkgAfter target=$target, send BACK")
         markMisclick(pkgBefore, reason = "to:$pkgAfter", toastEnabled = true)
         val backed = A11yRuleEngine.performActionBack()
         delay(BACK_WAIT)
         // 真机(vivo/Android16)实测: BACK 返回 true 也可能什么都没发生, 且 topActivityFlow 是**缓存值**
         // (屏幕锁了/没有新事件时会停在旧值) —— 所以这里必须用**新读一次**的窗口包名来判断
+        // (实现见 GuardUtils.currentForegroundPkg, 与 JumpGuard 共用同一份)
         val freshPkg = currentForegroundPkg()
         if (freshPkg == pkgBefore) {
-            LogUtils.d("FakeSkipGuard back ok sent=$backed now=$freshPkg")
+            LogUtils.d("$LOG_TAG back ok sent=$backed now=$freshPkg")
             return
         }
         // BACK 没把用户带回来 → 用原 App 的启动意图拉回(有 SYSTEM_ALERT_WINDOW/无障碍服务, 不受后台启动限制)
-        val relaunched = relaunchApp(pkgBefore)
+        val relaunched = relaunchApp(pkgBefore, LOG_TAG)
         delay(RELAUNCH_WAIT)
+        // now= 是"按返回后、拉起前"的那次读取, after= 是**拉起之后再读一次** —— 两者有意不是同一时刻,
+        // 排障时看到的 now≠after 正是"拉起生效了", 不是日志自相矛盾
         LogUtils.d(
-            "FakeSkipGuard back missed sent=$backed now=${freshPkg ?: "null"} relaunch=$relaunched after=${currentForegroundPkg() ?: "null"}"
+            "$LOG_TAG back missed sent=$backed now=${freshPkg ?: "null"} relaunch=$relaunched after=${currentForegroundPkg() ?: "null"}"
         )
     }
 
     // ---------------- 内部 ----------------
-
-    /**
-     * 新读一次当前前台包名(不看缓存流)。
-     * 依次尝试: 活动窗口根节点 → 各窗口里 focused/active 的那个 → 都没有就返回 null(未知, 不做动作)。
-     */
-    private fun currentForegroundPkg(): String? {
-        runCatching {
-            A11yService.instance?.rootInActiveWindow?.packageName?.toString()
-        }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
-        return runCatching {
-            A11yRuleEngine.compatWindows()
-                .firstOrNull { w -> runCatching { w.isFocused || w.isActive }.getOrDefault(false) }
-                ?.root?.packageName?.toString()
-        }.getOrNull()?.takeIf { it.isNotEmpty() }
-    }
-
-    /** 把原 App 拉回前台(落地页误点/被踢到桌面后的兜底) */
-    private fun relaunchApp(pkg: String): Boolean {
-        if (pkg.isEmpty()) return false
-        return runCatching {
-            val intent = app.packageManager.getLaunchIntentForPackage(pkg) ?: return@runCatching false
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-            app.startActivity(intent)
-            true
-        }.getOrElse {
-            LogUtils.d("FakeSkipGuard relaunch error pkg=$pkg", it)
-            false
-        }
-    }
 
     private fun markMisclick(appId: String, reason: String, toastEnabled: Boolean) {
         if (appId.isEmpty()) return
         val list = vetoAppIds()
         if (!list.add(appId)) return
         storeFlow.value = storeFlow.value.copy(fakeSkipVetoApps = list.joinToString("\n"))
-        LogUtils.d("FakeSkipGuard veto-add pkg=$appId reason=$reason total=${list.size}")
+        LogUtils.d("$LOG_TAG veto-add pkg=$appId reason=$reason total=${list.size}")
         if (toastEnabled) showVetoToast(appId)
     }
 
     private fun showVetoToast(appId: String) {
         if (!toastShownAppIds.add(appId)) return
         toast(
-            "假跳过防护: 已停止在「${appName(appId)}」自动点击不可点的跳过文字\n(可在 设置 页恢复)",
+            "假跳过防护: 已停止在「${appLabel(appId)}」自动点击不可点的跳过文字\n(可在 设置 页恢复)",
             forced = true,
         )
-    }
-
-    private fun appName(appId: String): String {
-        return runCatching {
-            val pm = app.packageManager
-            pm.getApplicationLabel(pm.getApplicationInfo(appId, 0)).toString()
-        }.getOrNull()?.takeIf { it.isNotEmpty() } ?: appId
     }
 
     /** 这次点击是否属于"跳过广告"语义(节点文本像跳过, 或所在规则组名像开屏/广告) */

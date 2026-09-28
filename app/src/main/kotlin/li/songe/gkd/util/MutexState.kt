@@ -52,9 +52,11 @@ class MutexState() {
         scope: CoroutineScope,
         context: CoroutineContext,
         block: suspend () -> Unit,
-    ) = scope.launchTry(context = context) {
-        withStateLock {
-            block()
+    ) {
+        scope.launchTry(context = context) {
+            withStateLock {
+                block()
+            }
         }
-    }.let { }
+    }
 }

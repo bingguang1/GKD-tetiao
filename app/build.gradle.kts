@@ -1,18 +1,5 @@
 import com.android.build.api.variant.impl.VariantOutputImpl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import kotlin.reflect.full.declaredMemberProperties
-
-fun String.runCommand(): String {
-    val process = ProcessBuilder(split(" "))
-        .redirectErrorStream(true)
-        .start()
-    val output = process.inputStream.bufferedReader().readText().trim()
-    val exitCode = process.waitFor()
-    if (exitCode != 0) {
-        error("Command failed with exit code $exitCode: $output")
-    }
-    return output
-}
 
 data class GitInfo(
     val commitId: String,
@@ -73,9 +60,6 @@ android {
         versionName = "1.12.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        vectorDrawables {
-            useSupportLibrary = true
-        }
         androidResources {
             localeFilters += listOf("zh", "en")
         }
@@ -84,9 +68,11 @@ android {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
 
-        GitInfo::class.declaredMemberProperties.onEach {
-            manifestPlaceholders[it.name] = it.get(gitInfo) ?: ""
-        }
+        // 只写 AndroidManifest.xml 真正消费的 3 个占位符(commitId/commitTime/tagName),
+        // GitInfo.versionNameSuffix 不在这里下发 —— 它由 buildTypes.versionNameSuffix 直接使用
+        manifestPlaceholders["commitId"] = gitInfo.commitId
+        manifestPlaceholders["commitTime"] = gitInfo.commitTime
+        manifestPlaceholders["tagName"] = gitInfo.tagName ?: ""
     }
 
     buildFeatures {
@@ -104,17 +90,6 @@ android {
         }
     } else {
         signingConfigs.getByName("debug")
-    }
-
-    val playSigningConfig = if (project.hasProperty("PLAY_STORE_FILE")) {
-        signingConfigs.create("play") {
-            storeFile = file(project.properties["PLAY_STORE_FILE"].toString())
-            storePassword = project.properties["PLAY_STORE_PASSWORD"].toString()
-            keyAlias = project.properties["PLAY_KEY_ALIAS"].toString()
-            keyPassword = project.properties["PLAY_KEY_PASSWORD"].toString()
-        }
-    } else {
-        gkdSigningConfig
     }
 
     buildTypes {
@@ -141,14 +116,13 @@ android {
     }
     productFlavors {
         flavorDimensions += "channel"
+        // 上游原有的 play 渠道 flavor 已删除: 本 fork 不发布到 Google Play(与上游同包名但签名不同,
+        // 根本不可能上架), 该 flavor 从未被构建过 —— 它唯一的产物差异是 is_accessibility_tool=false
+        // 与 AboutPage 里那几处"从 Play 安装"的提示分支, 属于永远走不到的死代码。
         create("gkd") {
             isDefault = true
             signingConfig = gkdSigningConfig
             resValue("bool", "is_accessibility_tool", "true")
-        }
-        create("play") {
-            signingConfig = playSigningConfig
-            resValue("bool", "is_accessibility_tool", "false")
         }
         all {
             dimension = flavorDimensions.first()
@@ -186,15 +160,12 @@ kotlin {
     compilerOptions {
         jvmTarget.set(rootProject.ext["kotlin.jvmTarget"] as JvmTarget)
         freeCompilerArgs.addAll(
-            "-opt-in=kotlin.RequiresOptIn",
             "-opt-in=kotlin.contracts.ExperimentalContracts",
             "-opt-in=kotlinx.coroutines.FlowPreview",
             "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
             "-opt-in=kotlinx.serialization.ExperimentalSerializationApi",
             "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
-            "-opt-in=androidx.compose.foundation.ExperimentalFoundationApi",
             "-opt-in=androidx.compose.animation.graphics.ExperimentalAnimationGraphicsApi",
-            "-opt-in=androidx.compose.ui.ExperimentalComposeUiApi",
             "-opt-in=androidx.compose.foundation.layout.ExperimentalLayoutApi",
             "-Xcontext-parameters",
             "-Xexplicit-backing-fields",
@@ -220,11 +191,10 @@ loc {
 }
 
 dependencies {
-    implementation(libs.kotlin.stdlib)
+    // 未显式声明 kotlin-stdlib: Kotlin 插件默认注入(gradle.properties 未关闭 kotlin.stdlib.default.dependency)
 
     implementation(project(":selector"))
 
-    implementation(libs.androidx.appcompat)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.service)
@@ -236,7 +206,6 @@ dependencies {
     implementation(libs.compose.icons)
     implementation(libs.compose.preview)
     debugImplementation(libs.compose.tooling)
-    androidTestImplementation(libs.compose.junit4)
 
     implementation(libs.compose.activity)
     implementation(libs.compose.material3)
@@ -247,7 +216,8 @@ dependencies {
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso)
+    // androidTest 里没有 Compose 规则/Espresso 的使用点(只有 ExampleInstrumentedTest),
+    // 因此不声明 compose.junit4 与 androidx.espresso
 
     compileOnly(project(":hidden_api"))
     implementation(libs.rikka.shizuku.api)

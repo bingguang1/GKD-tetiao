@@ -1,13 +1,11 @@
 package li.songe.gkd.service
 
-import android.content.Intent
 import android.view.accessibility.AccessibilityEvent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import li.songe.gkd.META
 import li.songe.gkd.a11y.A11yRuleEngine
 import li.songe.gkd.a11y.launcherAppId
-import li.songe.gkd.app
 import li.songe.gkd.appScope
 import li.songe.gkd.store.jumpGuardAppListFlow
 import li.songe.gkd.store.storeFlow
@@ -46,6 +44,8 @@ import java.util.concurrent.ConcurrentHashMap
  * 两者是互补的; 因为都要求"窗口内无 GKD 动作 / 有 GKD 动作", 所以同一场景不会被两只手同时处置。
  */
 object JumpGuard {
+
+    private const val LOG_TAG = "JumpGuard" // 日志/共用工具(GuardUtils)里区分调用方
 
     /** 源应用在前台多久之内发生的跨应用跳转才算"开屏跳转"(越短越准, 也越不容易误伤用户自己点开的跳转) */
     private const val WINDOW_MS = 1800L
@@ -107,7 +107,7 @@ object JumpGuard {
         curSince = now
         if (prev == null || prev.isEmpty()) return // 首次观察, 没有"源应用"可比
         runCatching { evaluate(prev, prevSince, pkg, now) }
-            .onFailure { LogUtils.d("JumpGuard evaluate error", it) }
+            .onFailure { LogUtils.d("$LOG_TAG evaluate error", it) }
     }
 
     // ---------------- 内部 ----------------
@@ -134,7 +134,7 @@ object JumpGuard {
 
         val shakeSeen = shakeEvidenceAt >= prevSince
         LogUtils.d(
-            "JumpGuard jump pkg=$prevPkg -> $newPkg gap=${gap}ms shake=$shakeSeen reason=guarded-app, send BACK"
+            "$LOG_TAG jump pkg=$prevPkg -> $newPkg gap=${gap}ms shake=$shakeSeen reason=guarded-app, send BACK"
         )
         handle(prevPkg, newPkg, shakeSeen)
     }
@@ -148,15 +148,17 @@ object JumpGuard {
             val backed = A11yRuleEngine.performActionBack()
             delay(BACK_WAIT)
             // 与 FakeSkipGuard 同样的坑: topActivityFlow 是缓存值, 必须**新读一次**窗口包名
+            // (实现见 GuardUtils.currentForegroundPkg, 两边共用同一份, 坑位说明也只需维护一处)
             val fresh = currentForegroundPkg()
             if (fresh == prevPkg) {
-                LogUtils.d("JumpGuard back ok sent=$backed now=$fresh")
+                LogUtils.d("$LOG_TAG back ok sent=$backed now=$fresh")
                 return@launchTry
             }
-            val relaunched = relaunchApp(prevPkg)
+            val relaunched = relaunchApp(prevPkg, LOG_TAG)
             delay(RELAUNCH_WAIT)
+            // now= 是"按返回后、拉起前"的一次读取, after= 是拉起之后再读一次 —— 不是同一时刻
             LogUtils.d(
-                "JumpGuard back missed sent=$backed now=${fresh ?: "null"} relaunch=$relaunched after=${currentForegroundPkg() ?: "null"}"
+                "$LOG_TAG back missed sent=$backed now=${fresh ?: "null"} relaunch=$relaunched after=${currentForegroundPkg() ?: "null"}"
             )
         }
     }
@@ -164,44 +166,13 @@ object JumpGuard {
     private fun showToastOnce(prevPkg: String, newPkg: String, shakeSeen: Boolean) {
         val key = "$prevPkg->$newPkg"
         if (!toastedPairs.add(key)) return
-        val from = appName(prevPkg)
-        val to = appName(newPkg)
+        val from = appLabel(prevPkg)
+        val to = appLabel(newPkg)
         val text = if (shakeSeen) {
             "摇一摇拦截: 「$from」开屏期间被带到「$to」, 已退回"
         } else {
             "跳转防护: 已从「$to」退回「$from」(开屏 1.8 秒内的跳转)"
         }
         toast(text, forced = true)
-    }
-
-    private fun appName(appId: String): String = runCatching {
-        val pm = app.packageManager
-        pm.getApplicationLabel(pm.getApplicationInfo(appId, 0)).toString()
-    }.getOrNull()?.takeIf { it.isNotEmpty() } ?: appId
-
-    /** 新读一次当前前台包名(不看缓存流); 都拿不到就返回 null(未知 → 不做动作) */
-    private fun currentForegroundPkg(): String? {
-        runCatching {
-            A11yService.instance?.rootInActiveWindow?.packageName?.toString()
-        }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
-        return runCatching {
-            A11yRuleEngine.compatWindows()
-                .firstOrNull { w -> runCatching { w.isFocused || w.isActive }.getOrDefault(false) }
-                ?.root?.packageName?.toString()
-        }.getOrNull()?.takeIf { it.isNotEmpty() }
-    }
-
-    /** 把原 App 拉回前台 */
-    private fun relaunchApp(pkg: String): Boolean {
-        if (pkg.isEmpty()) return false
-        return runCatching {
-            val intent = app.packageManager.getLaunchIntentForPackage(pkg) ?: return@runCatching false
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-            app.startActivity(intent)
-            true
-        }.getOrElse {
-            LogUtils.d("JumpGuard relaunch error pkg=$pkg", it)
-            false
-        }
     }
 }

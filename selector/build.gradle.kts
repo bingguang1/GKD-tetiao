@@ -26,7 +26,7 @@ kotlin {
         }
         commonMain {
             dependencies {
-                implementation(libs.kotlin.stdlib)
+                // 不显式声明 kotlin-stdlib: Kotlin Multiplatform 插件默认注入
             }
         }
         jvmTest {

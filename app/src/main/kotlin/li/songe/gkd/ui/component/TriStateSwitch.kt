@@ -58,9 +58,6 @@ private val PressedHandleWidth = 28.dp
 private val StateLayerSize = 40.dp
 private val ThumbPadding = (TrackHeight - ThumbDiameter) / 2
 
-///** Icon size to use for [thumbContent] */
-val TriStateSwitchIconSize = 16.dp
-
 private val DefaultAnimationSpec: FiniteAnimationSpec<Float> =
     spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
 
@@ -84,7 +81,7 @@ private val SnapSpecInstance = SnapSpec<Float>()
  *                        `false→null`, `null→true`, `true→false` (cycle).
  *                        Pass `null` to make the switch non-interactive.
  * @param modifier        Modifier applied to this composable.
- * @param thumbContent    Optional content drawn inside the thumb (expected size [TriStateSwitchIconSize]).
+ * @param thumbContent    Optional content drawn inside the thumb (16.dp 是 Material 的惯例尺寸).
  * @param enabled         When `false` the switch is non-interactive and visually dimmed.
  * @param colors          [TriStateSwitchColors] controlling the switch appearance.
  * @param interactionSource Optional hoisted [MutableInteractionSource].
@@ -457,9 +454,6 @@ object TriStateSwitchDefaults {
         disabledIndeterminateBorderColor = disabledIndeterminateBorderColor,
         disabledIndeterminateIconColor = disabledIndeterminateIconColor,
     )
-
-    /** Icon size to use for `thumbContent`. */
-//    val IconSize = TriStateSwitchIconSize
 }
 
 /**

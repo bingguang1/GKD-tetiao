@@ -97,10 +97,10 @@ data class AppMeta(
     val commitUrl = "https://github.com/bingguang1/gkd-tejiao/".run {
         plus(if (tagName != null) "tree/$tagName" else "commit/$commitId")
     }
-    val isGkdChannel get() = channel == "gkd"
     // 本 fork 关闭应用内检测更新: 上游更新源(registry.npmmirror.com/@gkd-kit/app)发布的是官方 GKD,
     // 而本 fork 与官方同包名(li.songe.gkd)但签名不同, 装了会因签名冲突失败或把用户的 fork 覆盖成官方版。
     // 因此更新请关注本仓库 Releases: 见 util/Constants.kt 的 RELEASES_URL
+    // (上游原有的 `isGkdChannel` 派生属性已随 play flavor 的删除一并移除 —— 本 fork 只构建 gkd 渠道)
     val updateEnabled get() = false
     val isBeta get() = versionName.contains("beta")
 }

@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<!--
+  本 fork 的 gkd 渠道源码集 manifest。
 
-    <uses-permission
-        android:name="android.permission.REQUEST_INSTALL_PACKAGES"
-        tools:ignore="RequestInstallPackagesPolicy" />
+  上游原样保留的 `<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />`
+  已被移除：本 fork 关闭了应用内检测更新(App.kt 的 `META.updateEnabled = false`，
+  原因见该处注释与 README)，因此 `util/Upgrade.kt` 的下载/安装流程完全不可达
+  (`MainViewModel.updateStatus` 恒为 null)，该权限没有任何实际使用点。
+
+  它属于「高危权限 + 无可达用途」的组合：公开仓库里最容易被当成恶意软件特征之一，
+  故不声明。若将来重新开启应用内更新(自建更新源时)，需要把它加回来，否则安装新版本会失败。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 </manifest>

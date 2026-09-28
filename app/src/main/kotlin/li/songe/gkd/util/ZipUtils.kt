@@ -71,9 +71,17 @@ object ZipUtils {
         zipFile: File,
         destDir: File,
     ) {
+        val destRoot = destDir.canonicalFile
         ZipFile(zipFile).use { zip ->
             zip.entries().asSequence().forEach { entry ->
-                val outFile = destDir.resolve(entry.name)
+                val outFile = File(destRoot, entry.name)
+                // 防 Zip Slip: 条目名里的 `..` / 绝对路径 / 符号链接都不能写到 destDir 之外。
+                // (AndroidManifest.xml 里接收 zip 的 OpenFileActivity 是 exported=true,
+                //  设备上任意 App 都能投递构造好的 zip —— 不校验就等于允许越目录写文件)
+                if (!outFile.canonicalPath.startsWith(destRoot.path + File.separator)) {
+                    LogUtils.d("unzip skip out-of-dir entry: ${entry.name}")
+                    return@forEach
+                }
                 if (entry.isDirectory) {
                     outFile.mkdirs()
                 } else {
