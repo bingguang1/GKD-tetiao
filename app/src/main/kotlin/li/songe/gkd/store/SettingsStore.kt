@@ -8,6 +8,7 @@ import li.songe.gkd.util.AutomatorModeOption
 import li.songe.gkd.util.RuleSortOption
 import li.songe.gkd.util.UpdateChannelOption
 import li.songe.gkd.util.UpdateTimeOption
+import li.songe.gkd.util.JumpGuardWindowOption
 
 @Serializable
 data class SettingsStore(
@@ -27,8 +28,12 @@ data class SettingsStore(
     val strictClickGuard: Boolean = true,
     /** fork v102: 坐标守卫——拒绝在"用户看不到"的节点范围内打盲坐标(若有规则故意用不可见节点当坐标原点, 可单独关掉这一条) */
     val guardInvisibleNode: Boolean = true,
-    /** fork v105: 摇一摇跳转防护——开屏 1.8 秒内 GKD 没点过任何东西却跳到别的App时, 判为摇一摇广告跳转并立刻退回原App; v106 起**只对「跳转防护应用」名单里的应用生效**(名单默认空, 见 StoreExt.jumpGuardAppListFlow) */
+    /** fork v105: 摇一摇跳转防护——开屏窗口内(时长见 jumpGuardWindowMs)跳到别的App时, 判为摇一摇广告跳转并立刻退回原App; v106 起**只对「跳转防护应用」名单里的应用生效**(名单默认空, 见 StoreExt.jumpGuardAppListFlow) */
     val jumpGuard: Boolean = true,
+    /** fork v108: 摇一摇跳转防护的**开屏时长(毫秒)** —— **当前页面**出现之后多久之内发生的跨应用跳转才算"开屏跳转"。原来写死 1.8 秒, 而真机实测(2026-10-02)校园卡 App 的摇一摇广告在开屏页出现后 4.2/5.0/6.8 秒才跳, 1.8 秒一次都追不上(表现=功能失效), 所以改为用户可配、默认 8 秒(见 util/JumpGuardWindowOption) */
+    val jumpGuardWindowMs: Long = JumpGuardWindowOption.S8.value,
+    /** fork v107: 关闭快应用——被广告拉进"快应用引擎"时立刻退回原应用(默认开, 见 service/QuickAppGuard.kt); 引擎的彻底停用/掐安装权限在「快应用引擎」页里按需执行(需 Shizuku 或一键 ADB) */
+    val quickAppGuard: Boolean = true,
     /** fork: 用户在通知栏/控制页/快捷磁贴上手动关闭无障碍后置 true, 自动守护暂停拉起, 直到用户再次手动开启 */
     val manualA11yOff: Boolean = false,
     val enableStatusService: Boolean = false,

@@ -86,8 +86,21 @@ val jumpGuardAppListFlow by lazy {
     )
 }
 
-fun checkAppBlockMatch(appId: String): Boolean {
-    if (blockMatchAppListFlow.value.contains(appId)) {
+/**
+ * fork(v107): 关闭快应用——「快应用引擎」名单(换行分隔包名)。
+ * 内容是**识别结果 ∪ 用户手动添加**: [li.songe.gkd.service.QuickAppRegistry] 每次识别后把
+ * 探测到的引擎写进来(这样"已停用"的引擎不会因为不再响应 hap:// 而从列表里消失, 用户还能恢复它),
+ * 用户也可以在选择页里手动增删。
+ */
+val quickAppEngineListFlow by lazy {
+    createTextFlow(
+        key = "quick_app_engine_list",
+        decode = { it?.let(AppListString::decode) ?: emptySet() },
+        encode = AppListString::encode,
+    )
+}
+
+fun checkAppBlockMatch(appId: String): Boolean {    if (blockMatchAppListFlow.value.contains(appId)) {
         return true
     }
     if (storeFlow.value.enableBlockA11yAppList) {
@@ -105,6 +118,7 @@ fun initStore() = appScope.launchTry(Dispatchers.IO) {
     a11yScopeAppListFlow.value
     guardAssocAppListFlow.value
     jumpGuardAppListFlow.value
+    quickAppEngineListFlow.value
     gkdStartCommandText
     ExposeService.initCommandFile()
 }

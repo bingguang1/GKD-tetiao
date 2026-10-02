@@ -49,6 +49,34 @@ sealed class UpdateTimeOption(
     }
 }
 
+/**
+ * fork(v108): 「摇一摇跳转防护」的开屏时长 —— **当前页面**出现之后多久之内发生的跨应用跳转才算"开屏跳转"。
+ *
+ * 为什么必须可配 + 默认要够大: 原来写死 1.8 秒, 而真机取证(2026-10-02 gkd-20261002.log, 校园卡 App
+ * 的摇一摇广告)三次跳转分别发生在开屏页出现后 **4.2s / 5.0s / 6.8s** —— 1.8 秒一次都追不上,
+ * 表现就是"这个功能完全没生效"。默认取 8 秒(能覆盖上述实测), 用户可按自己机型/习惯调。
+ * 代价: 调得越大, 越可能把"用户自己刚进应用就点了跳转"的正常操作也退回一次
+ * (会 toast 明确告知; 把该应用从「跳转防护应用」里去掉即可)。
+ */
+sealed class JumpGuardWindowOption(
+    override val value: Long,
+    override val label: String
+) : Option<Long> {
+    override val options get() = objects
+
+    data object S1_5 : JumpGuardWindowOption(1_500, "1.5 秒")
+    data object S2 : JumpGuardWindowOption(2_000, "2 秒")
+    data object S3 : JumpGuardWindowOption(3_000, "3 秒")
+    data object S5 : JumpGuardWindowOption(5_000, "5 秒")
+    data object S8 : JumpGuardWindowOption(8_000, "8 秒")
+    data object S10 : JumpGuardWindowOption(10_000, "10 秒")
+    data object S15 : JumpGuardWindowOption(15_000, "15 秒")
+
+    companion object {
+        val objects by lazy { listOf(S1_5, S2, S3, S5, S8, S10, S15) }
+    }
+}
+
 sealed class DarkThemeOption(
     override val value: Boolean?,
     override val label: String,

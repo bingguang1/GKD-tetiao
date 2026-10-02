@@ -19,7 +19,8 @@ import androidx.navigation3.runtime.NavKey
 import kotlinx.coroutines.flow.update
 import kotlinx.serialization.Serializable
 import li.songe.gkd.R
-import li.songe.gkd.store.jumpGuardAppListFlow
+import li.songe.gkd.service.QuickAppRegistry
+import li.songe.gkd.store.quickAppEngineListFlow
 import li.songe.gkd.ui.component.AnimatedIconButton
 import li.songe.gkd.ui.component.AppBarTextField
 import li.songe.gkd.ui.component.AppCheckBoxCard
@@ -33,21 +34,23 @@ import li.songe.gkd.util.switchItem
 import li.songe.gkd.util.throttle
 
 @Serializable
-data object JumpGuardAppListRoute : NavKey
+data object QuickAppEnginePickRoute : NavKey
 
 /**
- * fork(v106): 「跳转防护应用」选择页。
- * 勾选后, 这些 App **刚打开时**(「开屏时长」内, 时长在设置页可配, 默认 3 秒)若跳到别的应用
- * (摇一摇广告的典型行为), 会立刻按返回退回原页面。未勾选的应用一律不拦截。
+ * fork(v107): 「快应用引擎」手动补充页。
+ *
+ * 识别引擎的主力是"谁响应 hap:// 链接"(与包名无关), 但厂商自定义 scheme 等极端情况仍可能漏,
+ * 所以允许用户在这里把任意应用勾成"快应用引擎": 勾上后 → 被广告拉进它时同样会被秒退, 也能在上一页停用它。
+ * (列表内容是"自动记住的识别结果 ∪ 手动补充", 取消勾选即从名单里移除。)
  */
 @Composable
-fun JumpGuardAppListPage() {
+fun QuickAppEnginePickPage() {
     val mainVm = LocalMainViewModel.current
-    val vm = viewModel<JumpGuardAppListVm>()
+    val vm = viewModel<QuickAppEnginePickVm>()
     val appInfos by vm.appInfosFlow.collectAsState()
     val searchStr by vm.searchStrFlow.collectAsState()
     val showSearchBar by vm.showSearchBarFlow.asMutableState()
-    val guardList by jumpGuardAppListFlow.collectAsState()
+    val engineList by quickAppEngineListFlow.collectAsState()
 
     Scaffold(
         topBar = {
@@ -79,7 +82,7 @@ fun JumpGuardAppListPage() {
                             modifier = Modifier.autoFocus(),
                         )
                     } else {
-                        Text(text = "跳转防护应用")
+                        Text(text = "快应用引擎")
                     }
                 },
                 actions = {
@@ -108,27 +111,27 @@ fun JumpGuardAppListPage() {
             item(key = "tip") {
                 Text(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                    text = "勾选需要拦截「开屏跳转」的 App(默认空, 需自行添加): 这些 App 刚打开时(默认 3 秒内, 可在设置页的「开屏时长」里调), " +
-                        "若跳到别的应用(摇一摇广告的典型行为), 会立刻退回原页面。" +
-                        "未勾选的应用不做任何拦截; 若某个 App 的正常流程(如登录/支付跳转)被拦, 取消勾选即可。",
+                    text = "识别到的快应用引擎会自动出现在这里(勾选状态)。若你的手机有快应用、但上一页没识别出来," +
+                        "可以在这里手动把它勾上 —— 勾上后它同样会被\"关闭快应用\"拦截, 也能被停用。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             items(appInfos, { it.id }) { appInfo ->
-                val checked = guardList.contains(appInfo.id)
+                val checked = engineList.contains(appInfo.id)
                 AppCheckBoxCard(
                     appInfo = appInfo,
                     checked = checked,
                     onCheckedChange = {
-                        jumpGuardAppListFlow.update { set -> set.switchItem(appInfo.id) }
+                        quickAppEngineListFlow.update { set -> set.switchItem(appInfo.id) }
+                        QuickAppRegistry.refresh()
                     },
                 )
             }
             item(key = "bottom") {
                 Text(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                    text = "已选 ${guardList.size} 个应用" + if (guardList.isEmpty()) "(为空 = 不做任何拦截)" else "",
+                    text = "当前名单里有 ${engineList.size} 个包名",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(

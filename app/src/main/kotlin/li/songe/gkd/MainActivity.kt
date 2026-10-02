@@ -104,6 +104,10 @@ import li.songe.gkd.ui.GuardAssocAppListPage
 import li.songe.gkd.ui.GuardAssocAppListRoute
 import li.songe.gkd.ui.JumpGuardAppListPage
 import li.songe.gkd.ui.JumpGuardAppListRoute
+import li.songe.gkd.ui.QuickAppEnginePage
+import li.songe.gkd.ui.QuickAppEnginePickPage
+import li.songe.gkd.ui.QuickAppEnginePickRoute
+import li.songe.gkd.ui.QuickAppEngineRoute
 import li.songe.gkd.ui.ImagePreviewPage
 import li.songe.gkd.ui.ImagePreviewRoute
 import li.songe.gkd.ui.SlowGroupPage
@@ -291,6 +295,8 @@ class MainActivity : ComponentActivity() {
                             entry<EditBlockAppListRoute> { EditBlockAppListPage() }
                             entry<GuardAssocAppListRoute> { GuardAssocAppListPage() }
                             entry<JumpGuardAppListRoute> { JumpGuardAppListPage() }
+                            entry<QuickAppEngineRoute> { QuickAppEnginePage() }
+                            entry<QuickAppEnginePickRoute> { QuickAppEnginePickPage() }
                             entry<SlowGroupRoute> { SlowGroupPage() }
                             entry<SubsAppListRoute> { SubsAppListPage(it) }
                             entry<WebViewRoute> { WebViewPage(it) }

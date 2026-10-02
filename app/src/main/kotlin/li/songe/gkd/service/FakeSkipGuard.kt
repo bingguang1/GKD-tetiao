@@ -74,6 +74,25 @@ object FakeSkipGuard {
     private val toastShownAppIds = ConcurrentHashMap.newKeySet<String>()
     private val lastVetoLogTime = ConcurrentHashMap<String, Long>()
 
+    /**
+     * fork(v108): 最近一次**跳过类点击**的时间 —— 给 [JumpGuard] 判断"此刻该不该让位"用。
+     *
+     * ⚠️ 语义故意很窄: 只代表"我们刚点了一次跳过、正在等落点判定"。绝不能理解成"本次前台期间点过任何东西" ——
+     * JumpGuard 原来就是拿后者(所有 GKD 动作)当让位条件, 而开屏时 GKD 几乎必然点过东西(跳过/关弹窗),
+     * 于是它**在整个应用会话里都失效**(真机上表现就是"摇一摇跳转防护没生效")。
+     */
+    @Volatile
+    var lastSkipClickAt = 0L
+        private set
+
+    /**
+     * JumpGuard 用: 现在是否有一次"跳过类点击"的落点校验**正在进行中**(还在 VERIFY_DELAY 窗口里)。
+     * 这种时候让 [FakeSkipGuard] 去判落点, 避免两个模块对同一次跳转各按一次返回键。
+     */
+    fun isVerifyingSkipClick(now: Long = System.currentTimeMillis()): Boolean =
+        storeFlow.value.fakeSkipGuard && lastSkipClickAt > 0L &&
+            now - lastSkipClickAt <= VERIFY_DELAY + 300L
+
     // ---------------- 对外: 设置页用 ----------------
 
     /** 已被判定过假跳过、当前处于"降级"(不点不可点跳过文字)状态的应用 */
@@ -140,6 +159,8 @@ object FakeSkipGuard {
         // 刚被否决过的同一节点不再进入校验(理论上不会走到这里, 兜底)
         if (key == vetoNodeKey && now - vetoNodeTime < VETO_MEMO_MS) return
         val token = verifyToken.incrementAndGet()
+        // fork(v108): 登记"跳过类点击已发生", 供 JumpGuard 判断此刻是否该让位(见 lastSkipClickAt 的说明)
+        lastSkipClickAt = now
         val activityBefore = topActivity.activityId
         appScope.launchTry(Dispatchers.Default) {
             delay(VERIFY_DELAY)

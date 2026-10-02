@@ -64,6 +64,7 @@ import li.songe.gkd.permission.ignoreBatteryOptimizationsState
 import li.songe.gkd.permission.notificationState
 import li.songe.gkd.permission.requiredPermission
 import li.songe.gkd.service.FakeSkipGuard
+import li.songe.gkd.service.QuickAppRegistry
 import li.songe.gkd.service.StatusService
 import li.songe.gkd.service.TrackService
 import li.songe.gkd.service.fixRestartAutomatorService
@@ -76,6 +77,7 @@ import li.songe.gkd.ui.AdvancedPageRoute
 import li.songe.gkd.ui.BlockA11yAppListRoute
 import li.songe.gkd.ui.GuardAssocAppListRoute
 import li.songe.gkd.ui.JumpGuardAppListRoute
+import li.songe.gkd.ui.QuickAppEngineRoute
 import li.songe.gkd.ui.component.CustomOutlinedTextField
 import li.songe.gkd.ui.component.FullscreenDialog
 import li.songe.gkd.ui.component.PerfCustomIconButton
@@ -100,6 +102,7 @@ import li.songe.gkd.util.AndroidTarget
 import li.songe.gkd.util.BackupUtils
 import li.songe.gkd.util.DarkThemeOption
 import li.songe.gkd.util.findOption
+import li.songe.gkd.util.JumpGuardWindowOption
 import li.songe.gkd.util.launchAsFn
 import li.songe.gkd.util.mapState
 import li.songe.gkd.util.openAppDetailsSettings
@@ -445,7 +448,7 @@ fun useSettingsPage(): ScaffoldExt {
 
             TextSwitch(
                 title = "防摇一摇广告",
-                subtitle = "打开应用后2秒内自动拦截摇一摇开屏广告(免root)",
+                subtitle = "打开应用后的「开屏时长」内, 自动点掉广告上真正可点的\"跳过/关闭\"按钮(免root); 已经被晃走的情况由下面的「摇一摇跳转防护」退回来",
                 checked = store.shakeGuard,
                 onClickLabel = "切换防摇一摇广告开关",
                 onCheckedChange = {
@@ -513,7 +516,7 @@ fun useSettingsPage(): ScaffoldExt {
 
             TextSwitch(
                 title = "摇一摇跳转防护",
-                subtitle = "在下面选定的应用里: 开屏 1.8 秒内 GKD 没点过任何东西却跳到别的应用时, 判为摇一摇广告跳转并立刻退回原页面",
+                subtitle = "在下面选定的应用里: 打开后的「开屏时长」内(默认 8 秒)跳到别的应用(浏览器/市场/落地页)时, 判为摇一摇广告跳转并立刻退回原页面",
                 checked = store.jumpGuard,
                 onClickLabel = "切换摇一摇跳转防护开关",
                 onCheckedChange = {
@@ -524,18 +527,61 @@ fun useSettingsPage(): ScaffoldExt {
             run {
                 val jumpGuardList by jumpGuardAppListFlow.collectAsState()
                 AnimatedVisibility(visible = store.jumpGuard) {
-                    SettingItem(
-                        title = "跳转防护应用 (${jumpGuardList.size})",
-                        subtitle = if (jumpGuardList.isEmpty()) {
-                            "默认为空 = 不做任何拦截, 点击添加要防护的应用"
-                        } else {
-                            "只在这些应用里拦截开屏跳转, 点击修改"
-                        },
-                        onClickLabel = "进入跳转防护应用选择页",
-                        onClick = {
-                            mainVm.navigatePage(JumpGuardAppListRoute)
-                        })
+                    Column {
+                        // fork(v108): 开屏时长改为用户可配 —— 原来写死 1.8 秒, 真机上摇一摇广告常在
+                        // 开屏 3~5 秒后才被晃走, 于是"功能看起来没生效"
+                        TextMenu(
+                            title = "开屏时长",
+                            option = JumpGuardWindowOption.objects.findOption(store.jumpGuardWindowMs),
+                            onOptionChange = {
+                                storeFlow.update { s -> s.copy(jumpGuardWindowMs = it.value) }
+                            },
+                        )
+                        SettingItem(
+                            title = "跳转防护应用 (${jumpGuardList.size})",
+                            subtitle = if (jumpGuardList.isEmpty()) {
+                                "默认为空 = 不做任何拦截, 点击添加要防护的应用"
+                            } else {
+                                "只在这些应用里拦截开屏跳转, 点击修改"
+                            },
+                            onClickLabel = "进入跳转防护应用选择页",
+                            onClick = {
+                                mainVm.navigatePage(JumpGuardAppListRoute)
+                            })
+                        SettingItem(
+                            title = "",
+                            subtitle = "开屏时长 = **当前页面**出现后多久之内算\"开屏\"(「防摇一摇广告」与「摇一摇跳转防护」共用这个值)。" +
+                                "跳转防护还有一个兜底: **从开屏/广告页(Splash/Ad 之类)跳走时按 15 秒判** —— 所以这里调小也不会漏掉开屏广告。" +
+                                "想知道哪些应用总在开屏时跳走, 可在日志里搜 \"JumpGuard not-guarded\"。",
+                            imageVector = null,
+                        )
+                    }
                 }
+            }
+
+            TextSwitch(
+                title = "关闭快应用",
+                subtitle = "被广告拉进\"快应用引擎\"时立刻退回原应用(快应用是厂商预装的运行环境, 广告常借它自动下载 APK)",
+                checked = store.quickAppGuard,
+                onClickLabel = "切换关闭快应用开关",
+                onCheckedChange = {
+                    storeFlow.value = store.copy(
+                        quickAppGuard = it
+                    )
+                })
+            run {
+                val engines by QuickAppRegistry.enginesFlow.collectAsState()
+                SettingItem(
+                    title = "快应用引擎 (${engines.size})",
+                    subtitle = if (engines.isEmpty()) {
+                        "未识别到快应用引擎, 点击查看说明/手动补充"
+                    } else {
+                        "已停用 ${engines.count { it.disabled }} 个; 点击可停用引擎、禁止引擎安装应用(需 Shizuku 或一键 ADB)"
+                    },
+                    onClickLabel = "进入快应用引擎页",
+                    onClick = {
+                        mainVm.navigatePage(QuickAppEngineRoute)
+                    })
             }
 
             TextSwitch(

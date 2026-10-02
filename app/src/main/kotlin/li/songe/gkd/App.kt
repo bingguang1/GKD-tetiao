@@ -40,6 +40,7 @@ import li.songe.gkd.notif.initChannel
 import li.songe.gkd.service.A11yAutoGuard
 import li.songe.gkd.service.A11yService
 import li.songe.gkd.service.AssocAppGuard
+import li.songe.gkd.service.QuickAppRegistry
 import li.songe.gkd.service.clearHttpSubs
 import li.songe.gkd.service.initA11yWhiteAppList
 import li.songe.gkd.shizuku.initShizuku
@@ -308,6 +309,8 @@ class App : Application() {
         initScreenOnTriggers()
         // v99: 关联应用守护(打开关联 App 若无障碍被清除则立即恢复)
         AssocAppGuard.start()
+        // v107: 关闭快应用——启动时识别一次快应用引擎(供无障碍热路径做集合判断; 引擎被增删后由页面/动作再刷)
+        QuickAppRegistry.refresh()
         // 启动/被杀后重启进程时的自检
         appScope.launchTry(Dispatchers.IO) {
             delay(10_000)

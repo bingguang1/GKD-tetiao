@@ -80,6 +80,8 @@ abstract class A11yService : AccessibilityService(), OnA11yLife by DefaultA11yLi
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         // fork v105: 摇一摇跳转防护——独立于「防摇一摇」开关, 只跟踪前台包变化, 开销极小
         JumpGuard.onAccessibilityEvent(event)
+        // fork v107: 关闭快应用——被广告拉进"快应用引擎"时立刻退回原应用(独立开关, 纯集合判断)
+        QuickAppGuard.onAccessibilityEvent(event)
         ShakeGuard.onAccessibilityEvent(this, event)
         ruleEngine.onA11yEvent(event)
     }
