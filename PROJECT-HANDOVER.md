@@ -4,7 +4,7 @@
 > 本地构建请使用自己的密钥库与口令，不要照抄占位符。
 
 > 目标：给新手（新对话的 AI）在**不丢失上下文**的前提下，直接接手"GKD特调版 fork（防摇一摇 + 内置配置 + 无障碍自动守护 + 通知栏一键开关无障碍 + 桌面小组件 + 关联应用守护）在 MuMu/真机上的构建、验证与交付"。
-> 最后更新：**2026-10-02**（本轮三件事：① **v107=fok0015 新增「关闭快应用」三层防护**（识别 hap:// 引擎 / 秒退 / 停用引擎+掐安装权限），MuMu 全绿 + 真机实测通过，并查清 **vivo 非 root 停不掉系统应用(快应用引擎)**，见 **§11**；② **v108=fok0016/fok0017 修「摇一摇跳转防护失效」+「开屏时长」可配** —— 真机日志证明旧 1.8 秒窗口追不上 4~7 秒的跳转、旧让位判据让整个会话失效，见 **§12**；③ **v109=fok0018/fok0019 再修漏拦（完美校园→百度网盘 5~6 秒跳转）+ 重做「防摇一摇广告」**（旧版 2 秒窗口 + 强制摇一摇提示词 ⇒ 4 天 0 次生效），并加了"开屏/广告页"语义兜底，见 **§13**。历史版：v106=fok0014「按应用设定」、v105=fok0013 JumpGuard、v104~v97 见 §10 与 §9）
+> 最后更新：**2026-10-02**（本轮四件事：① **v107=fok0015 新增「关闭快应用」三层防护**（识别 hap:// 引擎 / 秒退 / 停用引擎+掐安装权限），MuMu 全绿 + 真机实测通过，并查清 **vivo 非 root 停不掉系统应用(快应用引擎)**，见 **§11**；② **v108=fok0016/fok0017 修「摇一摇跳转防护失效」+「开屏时长」可配** —— 真机日志证明旧 1.8 秒窗口追不上 4~7 秒的跳转、旧让位判据让整个会话失效，见 **§12**；③ **v109=fok0018/fok0019 再修漏拦（完美校园→百度网盘 5~6 秒跳转）+ 重做「防摇一摇广告」**（旧版 2 秒窗口 + 强制摇一摇提示词 ⇒ 4 天 0 次生效），并加了"开屏/广告页"语义兜底，见 **§13**；④ **v115=fok0022 修「GKD 在系统操作面板上误触」**（用户报"上拉到控制面板会触发东西"）—— 真机取证：面板里 7 个开关的节点 `text` 恰好是"关闭"而被 `ShakeGuard` 一天误点 40+ 次、`JumpGuard` 把"上滑面板"当跳转一天误按 7 次返回键；新增共用的系统界面闸门 `SystemSurfaces`，见 **§14**。历史版：v114=fok0021「系统ui 瞬时窗口导致漏拦」、v106=fok0014「按应用设定」、v105=fok0013 JumpGuard、v104~v97 见 §10 与 §9）
 
 ---
 
@@ -1008,3 +1008,219 @@ adb shell "pm disable-user --user 0 <引擎包>; cmd appops set <引擎包> REQU
   | ShakeGuard 真机扫描 | `ShakeGuard skip pkg=com.newcapec.mobile.ncp reason=no-close-button shakeHint=false nodes=154` —— 说明它**确实在扫**（154 个节点），当次页面确实没有可点的跳过/关闭（这广告页有时只有不可点的"跳过"文字，那类它一律不碰）；MuMu 上"有按钮"的场景两次都点掉了（§13.4） |
 - **结论**：用户报的两件事都闭环了 —— ①（完美校园→百度网盘）漏拦：已拦；②（防摇一摇广告）"是否正常"：原来 4 天 0 次生效（窗口 2 秒 + 强制提示词），现在窗口共用「开屏时长」、不再强制提示词、规则刚点过不补刀，MuMu 双路径 + 真机扫描均已验证。
 - 安装记录：手机历次版本 fok0017 → **fok0019 → fok0020**（vivo 确认框每次都要人工点；同时把 APK 推到 `/sdcard/Download/` 作为备选路径）。
+
+---
+
+## 14. 2026-10-02（同日第四轮）：修「GKD 在系统操作面板上误触」+ 四个守卫的系统界面闸门（v115=fok0022）
+
+### 14.1 用户原话与结论
+- 原话："修复我手机由于 GKD 带来的系统操作面板误触的全部问题。现状：上拉到控制面板时会触发什么东西，关掉 GKD 就不会触发。"
+- 结论：**与订阅规则无关**（四天日志里规则点到 `text=关闭` 的节点数 = **0**），肇事的是**我们自己的两个守卫** ——
+  它们把系统面板当成了"开屏广告页 / 别的应用"。已修，并给四个守卫加了统一的系统界面闸门。
+
+### 14.2 ★ 取证（vivo V2238A / Android16 / `gkd-20261002.log` + 控制面板界面树）
+1. **`ShakeGuard` 在面板上误点，一天 40+ 次**：
+   ```
+   15:23:19.159 ShakeGuard handled pkg=com.android.systemui via click=关闭 shakeHint=false window=3000ms nodes=270
+   15:27:22.413 ShakeGuard handled pkg=com.vivo.upslide    via click=关闭 shakeHint=false window=3000ms nodes=267
+   ```
+   面板界面树（`uiautomator dump`，250 个节点**全部**属于 `com.android.systemui`）里有 **7 个可点开关**，
+   节点形态是 `class=android.widget.Switch`、**`text=关闭`**、**功能名在 `content-desc` 里**：
+
+   | class | text | content-desc |
+   |---|---|---|
+   | android.widget.Switch | 关闭 | 飞行模式 |
+   | android.widget.Switch | 关闭 | WLAN- |
+   | android.widget.Switch | 关闭 | 振动模式 / 静音模式 |
+   | android.widget.Switch | 关闭 | 省电模式 |
+   | android.widget.Switch | 关闭 | 手电筒 |
+   | android.widget.Switch | 关闭 | **GKD特调版（本 App 的磁贴）** |
+
+   ⇒ 旧判据 `clickable && text.contains("关闭")` 把它们**全都**当成了开屏广告的关闭按钮。
+2. **最严重的后果**：点到 GKD 自己的磁贴 → `A11yAutoGuard manualOff=true` + "无障碍已关闭"
+   （15:18:54、15:21:07 各一次）。而"手动关闭"的语义是**守护不拉回** ⇒ 手机长时间**没有保护**
+   （取证时实测 `Bound services:{}`、`settings get secure enabled_accessibility_services` = `null`）。
+3. 同一形态还误伤应用内功能开关：`tv.danmaku.bili via click=关闭弹幕 / 已关闭弹幕`（B 站弹幕被点关）、
+   `com.android.camera via click=超微距,关闭`。
+4. **`JumpGuard` 把"上滑"当成跳转**：`JumpGuard jump pkg=com.newcapec.mobile.ncp -> com.vivo.upslide gap=174ms ... send BACK`
+   一天 **7 次**（另有 `-> com.vivo.hiboard` 负一屏、`-> com.vivo.smartmultiwindow`）——
+   这正是用户说的"上拉到控制面板时突然触发东西"（GKD 按了返回键 + 把原应用拉回前台）。
+5. **规则引擎无关**：`AttrInfo.*text=关闭` 在 09-29 ~ 10-02 日志里 **0 条**；规则点的是正常的"跳过"节点。
+6. 补一条**通道**证据：旧 `ShakeGuard` 既没有过滤系统界面的事件包名，也不校验"事件包名 == 活动窗口包名"，
+   于是"事件来自应用 A、而 `rootInActiveWindow` 却是面板的树"时它**照扫面板**。
+
+### 14.3 修复
+| 文件 | 改动 |
+|---|---|
+| `service/SystemSurfaces.kt` | ★ 新增：系统界面识别（四个守卫共用） |
+| `service/ShakeGuard.kt` | 系统界面整体不参与（不重置开屏窗口、不扫描）；只扫**自己应用**的窗口；开关类控件一律不点；"关闭"改为关闭类短语白名单 |
+| `service/JumpGuard.kt` | 瞬时浮层忽略但**保留**源应用（保住 fok0021 的修复）；桌面/上滑面板/负一屏 → **结束开屏计时**（`clearSource()`）；`not-guarded` 提示不再被系统组件刷屏 |
+| `service/FakeSkipGuard.kt` | 点后落点校验：**任何**系统界面都走 `left-system` 安全分支（旧版只认 launcher/systemui，于是上滑面板会被判成"假跳过误点"→ 按返回键 + 把该 App 拉黑） |
+| `service/QuickAppGuard.kt` | "从系统界面/桌面进入不拦"改用同一判据 |
+| `service/SensorOrientationGuard.kt` | **删除**（v104 遗留：真机已证实该 ROM 没有「获取设备方向」appop，模块只会在每次切换应用时刷一行日志 —— §9 待办①的收尾） |
+| `app/build.gradle.kts` | `fok0022` / `versionCode 115` |
+
+**`SystemSurfaces` 的两类语义（关键，别混）**
+- **瞬时浮层** `isTransientSurface`：`com.android.systemui`、`android`、安装器、厂商转场/系统插件/系统服务，
+  以及**所有没有桌面启动入口的包**（`getLaunchIntentForPackage == null`）。语义 = "不代表用户去了别的地方"
+  ⇒ 守卫**忽略**它们，但**不清空**源应用 —— 否则会重演 fok0021 的"窗口内跳转 100% 漏拦"。
+- **用户离开应用的面板** `isUserLeftSurface`：桌面（**动态**读 `launcherAppId`）、`com.vivo.upslide`、
+  `com.vivo.hiboard`、`com.vivo.ai.copilot`、`com.zui.launcher` 等。语义 = "用户已经离开当前应用"
+  ⇒ 既不能当跳转目标，也要结束开屏计时。
+- ⚠️ **为什么仍然需要一份厂商清单**：通用判据（没有启动入口）**挡不住 `com.vivo.upslide`** —— 它**有**启动入口
+  （`com.vivo.interaction.minscreen.activity.InteractionActivity`），本机 `cmd package resolve-activity` 实测确认。
+  其余实测无入口的：`com.vivo.hiboard / smartmultiwindow / frameworkui / daemonService / globalanimation /
+  systemuiplugin / gamecube / fingerprintui / nightpearl / com.bbk.launcher2 / com.android.systemui`。
+- **ShakeGuard 的"关闭"白名单**：裸 `关闭/關閉/close`，或 `关闭广告/弹窗/页面/提示/浮层/遮罩/视频/图片/应用/小程序/下载/安装/活动`；
+  开关的**状态文字**（`text=关闭` 且 `content-desc` 非空）与**开关类控件**（`Switch/ToggleButton/CheckBox/CompoundButton/RadioButton`、`isCheckable`）一律不点。
+  「跳过」「知道了」判据保持不变（`跳过 5`、`0S | 跳过` 仍能命中）。
+
+### 14.4 验证
+- **新靶**（`跳过广告助手\testapp` 的 `app` 模块）：`PanelSwitchTrapActivity` —— 3 个与真机同形的
+  `Switch(text=关闭, content-desc=飞行模式/WLAN/手电筒)` + 可选的真按钮「跳过广告」
+  （`--ez withSkip true` 显示它；`--ez skipReady true` 让它**出现即可点**）；任一开关被翻动就打印
+  `SWITCH-TOGGLED`（tag `PanelTrapTest`）。
+  ⚠️ 起靶命令：`adb shell am start -S -n com.example.fakeadstest/.PanelSwitchTrapActivity [--ez withSkip true --ez skipReady true]`
+- **MuMu A/B（同一靶、同一页面）**：
+
+  | 版本 | 用例 | 实测 |
+  |---|---|---|
+  | 旧 fok0020 | 陷阱（只有开关） | `PanelTrapTest: SWITCH-TOGGLED checked=true total=1` + `ShakeGuard handled pkg=com.example.fakeadstest **via click=关闭** ... nodes=14` ⇒ **复现** |
+  | 新 fok0022 | 同上 | `ShakeGuard skip pkg=com.example.fakeadstest reason=no-close-button nodes=14`、**零 SWITCH-TOGGLED** |
+  | 新 fok0022 | 陷阱 + 真按钮（`skipReady`） | `ShakeGuard handled ... **via click=跳过广告** ... nodes=15` + `btnSkip clicked`、**零 SWITCH-TOGGLED** ⇒ 真按钮照点，无回归 |
+
+  - ⚠️ **两个测试环境的坑**：① MuMu 上 `enableMatch=true` 时**订阅规则会先点掉**那个真按钮，
+    让 ShakeGuard 让位（日志里能看到 `gName:开屏广告` 的 `ActionResult(action=clickNode)`）——
+    要验 ShakeGuard 本身必须先把订阅关掉：`sqlite3 .../db/gkd.db 'update subs_item set enable=0;'` 再重启 GKD；
+    ② 靶里"按钮从不可点变为可点"**不产生窗口事件**，ShakeGuard 只在窗口事件时扫描 ⇒ 必须用 `skipReady`
+    才能验"真按钮照点"（真机开屏广告也是按钮与页面同时出现）。
+- **真机 vivo**：装 v115 后多次打开控制面板（`cmd statusbar expand-settings`），日志**不再出现**
+  `ShakeGuard handled pkg=com.android.systemui / com.vivo.upslide`；面板 7 个开关与无障碍开关状态均不变。
+
+### 14.5 遗留 / 注意
+1. **面板里那个 GKD 磁贴**（`content-desc=GKD特调版`）本身没坏，但它就是"一键开关无障碍"的开关；
+   不想让它挨着常用开关的话，在控制面板的「编辑控制中心」里移出即可（这次误触就是它把无障碍关掉的）。
+2. **手机上的无障碍当时是关的**（`manualOff=true`，即"手动关闭"）—— 装完 v115 后需要**手动开一次**
+   （或点一次磁贴），因为手动关闭语义就是守护不拉回。
+3. **[待办] 联想 TB710FU 平板**：同一份代码，需要装 v115 复验（用户要求"两台都要修"）。
+   fok0021 修的 systemui 瞬时窗口判据现在是 `SystemSurfaces.isTransientSurface` 的一部分：逻辑等价、且范围更宽。
+4. **[待办/设计取舍] ShakeGuard 现在只扫"自己应用的窗口"**：真机转场瞬间 `rootInActiveWindow` 常为 null
+   （已有 `no-root` 早退且不占扫描配额），且**只有窗口事件到来时才扫描**。
+   若日后真机上出现"开屏广告的按钮出现得晚、没被点掉"，下一步应让 ShakeGuard 也响应
+   `TYPE_WINDOW_CONTENT_CHANGED`（或对同一开屏页做一次延迟重扫）—— **而不是**放宽节点判据。
+5. **[环境] testapp 构建**：本会话（workspace-write 沙箱）下 Kotlin 守护进程无法写
+   `C:\Users\<user>\AppData\Local\kotlin`，而本工程**不会**自动降级为非守护编译 ⇒ 直接在
+   `testapp\gradle.properties` 里加了 `kotlin.compiler.execution.strategy=in-process`（已提交进工程，勿删）。
+
+---
+
+## 15. 2026-10-02（同日第五轮）：装机平板 + 复盘出两个"我自己引入的"回归（v118=fok0025）
+
+> 用户要求：① 给联想平板装 GKD（平板上的已被删掉）；② 清理 GitHub 上 fok0021 的对外产物；
+> ③ 检查这一版有无功能漏洞或与系统冲突；④ 确认无误后上传 GitHub 并在简介里介绍功能。
+> （②④ 用户选择**先不动 GitHub**，见 §15.5 的现成脚本。）
+
+### 15.1 平板安装（联想 TB710FU / Android 16 / ZUI，serial 见 §4）
+- 装 **v118=fok0025**；首次启动导入内置配置（`subscription/-2.json`、`1.json`、`101.json` 都在 ✓）；
+  跑 App 自带的 `files/sh/start.sh`（GRANT + appops + expose）；再手动补
+  `appops set li.songe.gkd android:get_usage_stats allow`（start.sh 之后该项仍是 default）；
+  `settings put secure enabled_accessibility_services …` + `accessibility_enabled 1`；
+  `dumpsys deviceidle whitelist +li.songe.gkd`。
+- 验收：`WRITE_SECURE_SETTINGS granted=true`、无障碍 Bound、`AUTO_A11Y_CHECK` 闹钟在、日志 `Exception/FATAL`=**0**、
+  `非法选择器/非法位置`=**0**、守卫开关默认全开（`shakeGuard/jumpGuard/fakeSkipGuard/quickAppGuard/strictClickGuard` = true）。
+- ⚠️ **覆盖安装会解绑无障碍**：`adb install -r` 之后 `Bound services:{}`（服务仍在 enabled 列表里），
+  必须先 `am start` 一次再重写 `enabled_accessibility_services`，否则所有守卫静默失效（本次踩到，白测两轮）。
+- ⚠️ **平板控制面板没有"关闭"类可点节点**（dump 162 节点全是 `com.android.systemui`，无一个 text/desc 命中
+  关闭/跳过/知道了）⇒ §14 那个"面板开关被误点"的问题**是 vivo 特有的**，平板上不存在。
+
+### 15.2 ★ 回归①：「关闭快应用」秒退永不触发（fok0023 修）
+- **根因**（代码 review 发现 + 真机 A/B 证实）：v115 的系统界面闸门把"**没有桌面启动入口**"当成系统浮层，
+  而**快应用引擎正是这种包**（`com.lenovo.hyperengine`、vivo 的 `com.vivo.hybrid/vhome` 实测都 `No activity found`）
+  ⇒ `QuickAppGuard` 在**引擎判定之前**就 `return` 了。
+- **A/B**（MuMu，引擎靶改为**无桌面入口**版本 —— 真实引擎就是这样，靶必须一致：
+  `engine/src/main/AndroidManifest.xml` 已删掉 MAIN/LAUNCHER 过滤器）：
+  | 版本 | 宿主=设置 → hap:// 拉起引擎 | 结果 |
+  |---|---|---|
+  | fok0022 | 引擎起来了 | **0 次拦截**，引擎留在前台（回归复现） |
+  | fok0023 | 同上 | `QuickApp block … send BACK` + `back ok now=com.android.settings` ✓ |
+- 修法：`val isEngine = QuickAppRegistry.isEngine(pkg)` 提到浮层判定**之前**。
+
+### 15.3 ★★ 回归②：通用判据把**真实应用**误判成系统浮层（fok0025 修）
+- **现象**：平板上"宿主=设置 → 拉起引擎"仍然 0 次拦截，而日志转场明明显示 `settings → 引擎`。
+- **定位**（靠 15.4 新增的诊断日志，一行就够）：
+  `QuickApp seen engine=… prev=com.zui.launcher guardOn=true prevIsSystemSurface=true engines=2`
+  ⇒ 引擎出现前，守卫眼里的前台竟然是**桌面**，说明**设置页的窗口事件被当成系统浮层丢掉了**。
+- **根因**：`SystemSurfaces` 的通用判据用的是 `getLaunchIntentForPackage(pkg) != null`（有没有桌面入口），
+  但**联想平板(ZUI)** 上 `com.android.settings` 在该 API 下被判成"没有入口"——
+  而 `cmd package resolve-activity -a android.intent.action.MAIN -c android.intent.category.LAUNCHER com.android.settings`
+  能正常解析出 `com.android.settings/.Settings` ⇒ **应用内那个 API 在该 ROM 上不可靠**。
+  实测同一台机器上 `com.android.camera / com.android.gallery3d / com.android.documentsui` 也都没有桌面入口。
+- **修法**：判据换成**"有没有任何 Activity"**（与 GKD 自己的 `AppInfo.checkHasActivity` 同一套：
+  `getLaunchIntentForPackage` → `queryIntentActivities(Intent().setPackage)` → `getPackageInfo(GET_ACTIVITIES)`），
+  只有**完全没有 Activity 的纯服务/插件包**才算系统浮层。
+- **验收**（平板，v118）：
+  ```
+  host = com.android.settings/.Settings$WifiSettingsActivity
+  → am start -n com.example.fakequickapp/.QuickAppAdActivity -a VIEW -d hap://app/com.test
+  3s/5s focus 都回到 com.android.settings（被退回）
+  日志: QuickApp back ok sent=true now=com.android.settings   ★ 拦截成功
+  ```
+- **另一个相关的判据收紧**：`QuickAppGuard` 判"来源应用"改用 `isExplicitSystemSurface()`（**只看显式清单**，
+  不含通用启发式）—— 否则在"相机/图库/文件管理"这类没有桌面图标的真实应用里被广告拉进快应用会被静默放过。
+
+### 15.4 新增的诊断能力（fok0024，长期保留）
+- `QuickAppGuard`：引擎被识别时记一条（按"来源→引擎"节流 5s）
+  `QuickApp seen engine=<引擎> prev=<来源|null> guardOn=<开关> prevIsSystemSurface=<…> engines=<引擎数>`。
+  **作用**：把"引擎起来了但没拦"从黑盒变成一行可读结论（本次就是靠它定位 15.3）。
+
+### 15.5 GitHub（用户选择"先不动"，脚本已就绪；下面是**未认证只读探测**到的确切现状）
+- 环境里**没有** `GITHUB_TOKEN`（上一轮那个已不在；工作区也没有存 token），所以本轮**没有对 GitHub 做任何写操作**。
+- **仓库名以 `bingguang1/GKD-tetiao` 为准**（未认证探测：`api.github.com/repos/bingguang1/gkd-tejiao` 会 301 到
+  `full_name=bingguang1/GKD-tetiao` ⇒ GitHub 做了最近匹配重定向）。⚠️ **App 里的 `Constants.kt`
+  （以及 README/CHANGELOG 共 8 处）写的是 `gkd-tejiao`** —— 靠重定向能用，但不是规范拼写，建议下次构建一并纠正。
+- **当前 releases（未认证即可读）**：
+  | tag | id | 资产 | 说明 |
+  |---|---|---|---|
+  | `v1.12.2-fok0021` | 401617348 | `gkd-tejiao-v1.12.2-fok0021.apk`(3,334,863 B)、`gkd-tejiao-adb-tools.zip`(10,556 B) | **要清理的目标**（下载数 0/0） |
+  | `v1.12.2-fok0014` | 397710524 | `gkd-tejiao-v1.12.2-fok0014.apk`(3,318,503 B)、`gkd-tejiao-adb-tools.zip` | 历史版本，**不动** |
+- **tags**：`v1.12.2-fok0021`、`v1.12.2-fok0014`（前者要删）。
+- ⇒ 清理动作 = `DELETE /repos/.../releases/401617348`（资产随之删除）+ 删除 tag `v1.12.2-fok0021`；
+  按用户选择 **CHANGELOG 里的 v114/fok0021 历史条目保留**。
+- 现成脚本：`gkd-build\tools-gh\gh_fok.py`
+  - `list` 列出所有 release/tag；`del-fok0021 [--dry-run]` 按上面的口径清理；`publish <tag> <apk> <notes>` 建 release 并上传 APK + 说明。
+  - 用法：`$env:GITHUB_TOKEN="ghp_xxx"; python gkd-build\tools-gh\gh_fok.py list`
+- 发布说明草稿：`gkd-build\RELEASE-NOTES-fok0025.md`（可直接作为 release body；含功能一览与"已知边界"）。
+
+### 15.6 ★ 待用户确认 / 后续（"疑似的地方"清单）
+1. **[已完成] 手机已升到 v118**：vivo V2238A 重新接上后 `adb install -r` 直接 Success（未弹确认框），
+   配置零丢失（跳转防护名单 5 个应用 / 关联守护名单 5 个 / 引擎名单 `com.vivo.hybrid`+`com.vivo.vhome` /
+   `jumpGuardWindowMs=3000` 全部保留），无障碍由守护自动恢复绑定。**验收全部通过**：
+   - 控制面板 4 轮（开面板 4s → 收起 → 回桌面）：系统包守卫日志 **221 → 221（新增 0）**、无障碍保持开启；
+   - **「关闭快应用」用真机引擎验（本次回归的正面证据）**：
+     `QuickApp block pkg=com.android.settings -> com.vivo.hybrid engine=快应用框架服务, send BACK`
+     → `back ok sent=true now=com.android.settings`，2s/5s 采样前台都已是设置 ✓
+     （fok0022 时这条路径是**完全失效**的，所以这同时证明了 15.2 的修复在真机上成立）；
+   - 跳转防护正向回归：京东开屏窗口内跳设置 → `JumpGuard ... send BACK` → `back ok now=com.jingdong.app.mall` ✓；
+   - 全量自检：`Exception/FATAL`=0、`非法选择器/非法位置`=0。
+2. **[建议] 把控制面板里的 GKD 磁贴移出**：它就是一键关无障碍的开关（§14 那次误触就是它把无障碍关掉的），
+   移出后与"守护不拉回"的语义就不会互相打脸。
+3. **[设计取舍，问用户] 防摇一摇广告只在窗口事件时扫描**：按钮"从不可点变可点"不产生窗口事件
+   （新靶 `--ez withSkip` 实测），真机上如果遇到"开屏按钮出现得晚没被点掉"，下一步应让它也响应
+   `TYPE_WINDOW_CONTENT_CHANGED` 或对开屏页做一次延迟重扫 —— **而不是**放宽节点判据。
+4. **[设计取舍，问用户] `com.vivo.ai.copilot` 被列为"用户离开应用"**：广告若直接跳到 Jovi/AI 助手不会被拦。
+5. **[小概率] 判据缓存是"进程内永久"**：`launchableCache` 把"有没有 Activity"永久缓存，
+   同一进程内被卸载又重装的包可能一直用旧结论（影响面极小，可选 TTL）。
+6. **[仓库一致性] `Constants.kt` 里的仓库地址拼写**（`gkd-tejiao` vs `gkd-tetiao`）需要确认，错了就改一行。
+
+### 15.7 ★ 本次踩坑（血的教训，务必记住）
+- **绝对不要用 PowerShell 的文本读写去改源码文件**：`Get-Content -Raw` 在中文 Windows 下按 **GBK** 读
+  UTF-8 无 BOM 的文件（`build.gradle.kts` 里的中文注释被读成乱码），写回时还**吞掉了 1 个字符与 1 个换行**
+  ⇒ Kotlin DSL 报一堆 `Unexpected symbol`（本次是 4 分钟的构建直接失败）。
+  正确姿势：用 `edit`/`write` 工具，或 Python 明确指定 `encoding='utf-8'`（本次用 Python 逐行修复 + 校验括号配对）。
+- **`Set-Content -Encoding UTF8` 在 Windows PowerShell 下会加 BOM**（`gradle.properties` 有 BOM 会让 Gradle 报错，
+  见 §9 坑2）；修完要检查首字节。
+- **`adb install -r` 覆盖安装后无障碍会掉绑定**（服务还在 enabled 列表，但 `Bound services:{}`）——
+  必须先确认 `dumpsys accessibility | grep 'Bound services'` 里真有 GKD，再做验证，否则测出来的"功能没生效"全是假的。
+- **`$Host` 是 PowerShell 只读变量**：脚本里别用 `$host` 存宿主包名（本次两次被它打断）。
+- **PowerShell 双引号字符串里再写双引号**（哪怕是中文标签里的 `"控制面板"`）会直接解析错误 ——
+  标签一律用单引号或去掉引号。

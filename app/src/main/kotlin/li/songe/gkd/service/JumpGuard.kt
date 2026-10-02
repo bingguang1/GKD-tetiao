@@ -3,16 +3,13 @@ package li.songe.gkd.service
 import android.view.accessibility.AccessibilityEvent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import li.songe.gkd.META
 import li.songe.gkd.a11y.A11yRuleEngine
-import li.songe.gkd.a11y.launcherAppId
 import li.songe.gkd.a11y.topActivityFlow
 import li.songe.gkd.appScope
 import li.songe.gkd.store.jumpGuardAppListFlow
 import li.songe.gkd.store.storeFlow
 import li.songe.gkd.util.LogUtils
 import li.songe.gkd.util.launchTry
-import li.songe.gkd.util.systemUiAppId
 import li.songe.gkd.util.toast
 import java.util.concurrent.ConcurrentHashMap
 
@@ -32,7 +29,7 @@ import java.util.concurrent.ConcurrentHashMap
  * 判据(全部成立才动作):
  *   1. 源应用 A 在「跳转防护应用」名单里;
  *   2. 跨应用跳转发生在 **A 的当前页面出现之后的开屏时长内**(`store.jumpGuardWindowMs`, 用户可配, 默认 8 秒);
- *   3. 前台从 A 切到了别的应用 B, 且 B 不是桌面/系统界面/GKD 自己;
+ *   3. 前台从 A 切到了别的应用 B, 且 B **不是系统界面**(桌面 / 状态栏 / 上滑面板 / 负一屏 / GKD 自己 —— 判据见 [SystemSurfaces]);
  *   4. 此刻**没有**一次 `FakeSkipGuard` 的"跳过类点击落点校验"正在进行中(见下方 ★★ 修复说明)。
  *
  * 动作: 记日志 + toast + `BACK` 退回 A; 若 BACK 没生效则用 A 的启动意图把它拉回前台。
@@ -149,17 +146,29 @@ object JumpGuard {
         if (event == null) return
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
-        if (pkg.isEmpty() || pkg == META.appId) return
+        if (pkg.isEmpty()) return
         // ★★ fok0021 修复「系统界面的瞬时窗口冲掉源应用 → 窗口内跳转 100% 漏拦」:
         //   com.android.systemui 会频繁插入 TYPE_WINDOW_STATE_CHANGED(状态栏/通知/转场/厂商悬浮窗),
         //   它**不代表用户去了别的地方**。旧代码会让它覆盖 curPkg/pageAt/appEntryAt, 于是紧随其后的
-        //   那次真正的跨应用跳转被当成 "systemui -> B" 评估 —— 而 evaluate() 里对 systemUiAppId 是
-        //   直接 return, **连一行日志都不会留**, 表现就是"功能像是没生效"。
+        //   那次真正的跨应用跳转被当成 "systemui -> B" 评估 —— 而 evaluate() 对系统界面是直接 return,
+        //   **连一行日志都不会留**, 表现就是"功能像是没生效"。
         //   实测(Lenovo TB710FU / Android 16 / fok0020, 2026-10-02): 便签页出现后 1.25s 插入一次
         //   systemui 事件 ⇒「便签 → 设置」的窗口内快跳连续 3 次全部漏拦(名单里确实有 com.zui.notes);
         //   该机 activity_log 显示 systemui 瞬时窗口在同一分钟内可出现 4 次 ⇒ 真机上表现为"偶发失效"。
-        //   跳过它即可让源应用保持为"最后一个真实应用", 跳转判定恢复正常。
-        if (pkg == systemUiAppId) return
+        //   fok0022 起这条判据扩展到**所有**瞬时/浮层窗口(厂商转场动画、系统插件、无启动入口的系统包),
+        //   见 [SystemSurfaces.isTransientSurface] —— 判据不再只认"包名等于 com.android.systemui"。
+        if (SystemSurfaces.isTransientSurface(pkg)) return
+        // ★★ fok0022 修复「用户上滑到面板/回桌面被当成跳转 → 误按返回键」:
+        //   真机(vivo V2238A)`gkd-20261002.log` 里 `JumpGuard jump pkg=... -> com.vivo.upslide`
+        //   出现 **7 次**(gap 174~1609ms), 还有 `-> com.vivo.hiboard`(负一屏) —— 那都是**用户自己的
+        //   手势**, 而本模块把它判成"摇一摇广告把我带到别的应用", 于是按返回键 + 把原应用拉回前台
+        //   (用户看到的就是"上拉到控制面板时突然触发了什么东西")。
+        //   它们的真实含义是"**用户已经离开当前应用**": 所以既不能当跳转目标(上面那条已挡住),
+        //   也要**结束本次开屏计时** —— 否则用户从面板回到应用后, 再打开别的 App 会被当成开屏跳转拽回来。
+        if (SystemSurfaces.isUserLeftSurface(pkg)) {
+            clearSource()
+            return
+        }
         val activity = event.className?.toString()?.takeIf { it.isNotEmpty() }
         val now = System.currentTimeMillis()
         val prev = curPkg
@@ -194,6 +203,20 @@ object JumpGuard {
     private fun refTime(now: Long): Long =
         if (now - appEntryAt <= ENTRY_LIMIT_MS) maxOf(appEntryAt, pageAt) else appEntryAt
 
+    /**
+     * 用户离开了当前应用(回桌面 / 上滑面板 / 负一屏 / 打开 GKD 自己) → **结束本次开屏计时**。
+     *
+     * 下一次真实应用进入时源为空, 于是"用户从面板/桌面再打开别的 App"不会被判成开屏跳转拽回来
+     * (这正是 fok0022 修的误触路径之一)。注意: 瞬时浮层(状态栏/通知/转场)**不会**走到这里 ——
+     * 它们必须保留源应用, 否则会重演 fok0021 的"窗口内跳转 100% 漏拦"。
+     */
+    private fun clearSource() {
+        curPkg = null
+        curActivity = null
+        appEntryAt = 0L
+        pageAt = 0L
+    }
+
     /** 这个时长是否该判: 用户设定值 vs 开屏/广告页的兜底值(见 SPLASH_PAGE_WINDOW_MS) */
     private fun effectiveWindow(prevActivity: String?): Long {
         val base = windowMs()
@@ -221,8 +244,9 @@ object JumpGuard {
             suppressReturnPkg = null
             return
         }
-        // 跳到桌面/系统界面 → 可能是用户自己按了 Home, 不抢返回键(交给 FakeSkipGuard 的累计逻辑)
-        if (newPkg == launcherAppId || newPkg == systemUiAppId) return
+        // 跳到桌面/系统界面/上滑面板 → 用户自己的操作(Home、上滑、负一屏), 不抢返回键
+        // (fok0022 起判据换成共用的 SystemSurfaces, 不再只认 launcher/systemui 两个包名)
+        if (SystemSurfaces.isSystemSurface(newPkg)) return
         // ① 必须发生在"刚打开"的窗口内(时长由用户设定; 源页面像开屏/广告页时用兜底值, 见 effectiveWindow)
         val window = effectiveWindow(prevActivity)
         val gap = now - prevRef
@@ -252,7 +276,9 @@ object JumpGuard {
      */
     private fun hintNotGuarded(prevPkg: String, newPkg: String, gap: Long, now: Long) {
         // 从桌面/系统界面/自己切过去属于正常打开应用, 不算候选
-        if (prevPkg == launcherAppId || prevPkg == systemUiAppId || prevPkg == META.appId) return
+        // (fok0022: 系统组件之间的切换 —— 例如 `com.vivo.upslide -> com.vivo.daemonService` ——
+        //  以前会刷一堆"把它加进名单即可"的假线索, 会误导用户把系统组件加进防护名单)
+        if (SystemSurfaces.isSystemSurface(prevPkg) || SystemSurfaces.isSystemSurface(newPkg)) return
         // 刚处置过(含我们把用户拉回原应用之后的那一串转场) → 别把自家动作记成线索
         // (真机踩过: 我们 relaunch 回完美校园后, "百度网盘 -> 完美校园" 被记成 not-guarded, 会误导用户去加百度网盘)
         if (now < suppressReturnUntil) return

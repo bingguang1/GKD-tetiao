@@ -10,7 +10,7 @@ data class GitInfo(
 }
 
 val gitInfo = GitInfo(
-    commitId = "fok0021",
+    commitId = "fok0025",
     commitTime = "1789290000000",
     tagName = null,
 )
@@ -56,7 +56,7 @@ android {
         targetSdk = rootProject.ext["android.targetSdk"] as Int
 
         applicationId = "li.songe.gkd"
-        versionCode = 114
+        versionCode = 118
         versionName = "1.12.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -116,8 +116,8 @@ android {
     }
     productFlavors {
         flavorDimensions += "channel"
-        // 上游原有的 play 渠道 flavor 已删除: 本 fork 不发布到 Google Play(与上游同包名但签名不同,
-        // 根本不可能上架), 该 flavor 从未被构建过 —— 它唯一的产物差异是 is_accessibility_tool=false
+        // 上游原有的 play 渠道 flavor 已删除, 本 fork 不发布到 Google Play(与上游同包名但签名不同)
+        // 根本不可能上架, 该 flavor 从未被构建过 —— 它唯一的产物差异是 is_accessibility_tool=false
         // 与 AboutPage 里那几处"从 Play 安装"的提示分支, 属于永远走不到的死代码。
         create("gkd") {
             isDefault = true

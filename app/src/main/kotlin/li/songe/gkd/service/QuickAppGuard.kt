@@ -5,14 +5,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
-import li.songe.gkd.META
 import li.songe.gkd.a11y.A11yRuleEngine
-import li.songe.gkd.a11y.launcherAppId
 import li.songe.gkd.appScope
 import li.songe.gkd.store.storeFlow
 import li.songe.gkd.util.LogUtils
 import li.songe.gkd.util.launchTry
-import li.songe.gkd.util.systemUiAppId
 import li.songe.gkd.util.toast
 import java.util.concurrent.ConcurrentHashMap
 
@@ -48,11 +45,23 @@ object QuickAppGuard {
     /** 同一对 (原应用 → 引擎) 的处置冷却, 防止持续打架 */
     private const val PAIR_COOLDOWN_MS = 4000L
 
+    /** 诊断日志("看到引擎")的节流 */
+    private const val SEEN_LOG_INTERVAL_MS = 5000L
+
     /** 当前前台包(只跟踪 TYPE_WINDOW_STATE_CHANGED, 开销极小) */
     @Volatile
     private var curPkg: String? = null
 
     private val lastHandleAt = ConcurrentHashMap<String, Long>()
+
+    /**
+     * ★ fok0024 诊断日志: 每次"看到快应用引擎"都记一条(按"来源→引擎"节流)。
+     *
+     * 为什么加它: 真机排查时"引擎起来了但没被拦"完全是个黑盒 —— 到底是开关关了、来源被判成系统界面、
+     * 还是这次是从桌面主动打开的, 从日志里一个字都看不出来(本次在联想平板上就卡在这里)。
+     * 现在日志会直接给出: `prev=... guardOn=true prevIsSystemSurface=false engines=2`, 一眼定位。
+     */
+    private val lastSeenLogAt = ConcurrentHashMap<String, Long>()
 
     /** UI 展示用: 累计拦截次数 / 最近一次拦截 */
     val blockCountFlow = MutableStateFlow(0)
@@ -62,24 +71,49 @@ object QuickAppGuard {
         if (event == null) return
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
-        if (pkg.isEmpty() || pkg == META.appId) return
+        if (pkg.isEmpty()) return
+        // ★★ fok0023: **引擎判定必须排在浮层判定之前**。
+        //   快应用引擎是系统包, **通常没有桌面启动入口**(vivo 的 com.vivo.hybrid / com.vivo.vhome 就是),
+        //   而 [SystemSurfaces] 的通用判据恰恰是"没有启动入口 ⇒ 系统浮层" ⇒ 若先走浮层判定就会被直接
+        //   return(且不改状态), 于是本模块的"秒退"变成**永不触发** —— 这是 fok0022 引入的回归, fok0023 修掉。
+        val isEngine = QuickAppRegistry.isEngine(pkg)
+        // 非引擎的瞬时/浮层窗口(状态栏/通知/转场/厂商系统服务)不参与"来源→目标"判定
+        // (与 JumpGuard 同一条纪律, 见 SystemSurfaces)
+        if (!isEngine && SystemSurfaces.isTransientSurface(pkg)) return
         val prev = curPkg
         if (pkg == prev) return // 同一应用内换 Activity 不算跨应用跳转
+        if (isEngine) logEngineSeen(pkg, prev)
         curPkg = pkg
         if (!storeFlow.value.quickAppGuard) return
         if (prev == null || prev.isEmpty()) return // 首次观察, 没有"来源应用"可比
         // ★ 核心判据: 目标是快应用引擎
-        if (!QuickAppRegistry.isEngine(pkg)) return
+        if (!isEngine) return
         // 引擎内部换 Activity(同一个引擎包)不算
         if (QuickAppRegistry.isEngine(prev)) return
-        // 从桌面/系统界面进入 → 用户主动打开(如负一屏的快应用中心), 不拦
-        if (prev == launcherAppId || prev == systemUiAppId) return
+        // 从桌面/上滑面板/负一屏/系统界面进入 → 用户主动打开(如负一屏的快应用中心), 不拦
+        // ★ fok0024: 这里用**只看显式清单**的判据, 不用"没有启动入口"那条启发式 —— 否则
+        //   在"相机/图库/文件管理"这类**没有桌面图标的真实应用**里被广告拉进快应用时, 会被当成
+        //   "从系统界面进入"而静默放过(真机实测这几个包在联想平板上都没有 LAUNCHER 入口)。
+        if (SystemSurfaces.isExplicitSystemSurface(prev)) return
         val now = System.currentTimeMillis()
         val pairKey = "$prev->$pkg"
         if (now - (lastHandleAt[pairKey] ?: 0L) < PAIR_COOLDOWN_MS) return
         lastHandleAt[pairKey] = now
         runCatching { handle(prev, pkg) }
             .onFailure { LogUtils.d("$LOG_TAG handle error", it) }
+    }
+
+    /** 见 [lastSeenLogAt] 的说明: 把"看到引擎但没拦"的原因直接写进日志 */
+    private fun logEngineSeen(enginePkg: String, prev: String?) {
+        val key = "${prev ?: "-"}->$enginePkg"
+        val now = System.currentTimeMillis()
+        if (now - (lastSeenLogAt[key] ?: 0L) < SEEN_LOG_INTERVAL_MS) return
+        lastSeenLogAt[key] = now
+        LogUtils.d(
+            "$LOG_TAG seen engine=$enginePkg prev=${prev ?: "null"} guardOn=${storeFlow.value.quickAppGuard} " +
+                "prevIsSystemSurface=${if (prev == null) "n/a" else SystemSurfaces.isExplicitSystemSurface(prev)} " +
+                "engines=${QuickAppRegistry.enginesFlow.value.size}"
+        )
     }
 
     private fun handle(prevPkg: String, enginePkg: String) {

@@ -6,7 +6,6 @@ import kotlinx.coroutines.delay
 import li.songe.gkd.META
 import li.songe.gkd.a11y.A11yRuleEngine
 import li.songe.gkd.a11y.TopActivity
-import li.songe.gkd.a11y.launcherAppId
 import li.songe.gkd.a11y.topActivityFlow
 import li.songe.gkd.appScope
 import li.songe.gkd.data.ActionResult
@@ -14,7 +13,6 @@ import li.songe.gkd.data.ResolvedRule
 import li.songe.gkd.store.storeFlow
 import li.songe.gkd.util.LogUtils
 import li.songe.gkd.util.launchTry
-import li.songe.gkd.util.systemUiAppId
 import li.songe.gkd.util.toast
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -180,8 +178,12 @@ object FakeSkipGuard {
             )
             return
         }
-        if (pkgAfter.isEmpty() || pkgAfter == META.appId || pkgAfter == systemUiAppId || pkgAfter == launcherAppId) {
-            // 回到桌面/系统界面: 不抢返回键(可能只是用户自己按了 Home), 仅累计记录
+        if (pkgAfter.isEmpty() || SystemSurfaces.isSystemSurface(pkgAfter)) {
+            // 回到桌面/系统界面(含状态栏、通知、上滑面板、负一屏): 不抢返回键(可能只是用户自己按了 Home
+            // 或上滑打开了面板), 仅累计记录。
+            // ★ fok0022: 旧判据只认 `launcher/systemui` 两个包名 —— 用户"上滑"到 `com.vivo.upslide`
+            //   (上滑面板)时会被当成"跳到了别的应用 = 假跳过误点", 于是**按返回键 + 把该 App 记入降级名单**;
+            //   现在任何系统界面都走这条安全分支(判据集中在 [SystemSurfaces])。
             val n = (leftSystemCount[pkgBefore] ?: 0) + 1
             leftSystemCount[pkgBefore] = n
             LogUtils.d(

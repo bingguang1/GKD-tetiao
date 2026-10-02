@@ -3,6 +3,57 @@
 本文件记录本 fork（GKD 特调版）的更新；上游 GKD 的更新请见
 <https://github.com/gkd-kit/gkd/releases>。
 
+## v117 / 1.12.2
+
+应用内版本号 `1.12.2-fok0025`（versionCode 118）
+
+- **修「关闭快应用」秒退失效**（fok0023）—— 这是 v115 引入的回归：
+  快应用引擎是系统包、**桌面上没有图标**，而 v115 新加的"系统界面闸门"把"没有启动入口"当成了系统浮层 ⇒
+  引擎被误判并直接 `return`，**秒退永不触发**。现在**引擎判定排在浮层判定之前**。
+  真机 A/B（联想平板 / 无桌面入口的引擎靶）：修复前引擎留在前台（0 次拦截），
+  修复后 `QuickApp block ... send BACK` + `back ok now=com.android.settings`。
+- **修「系统界面判据把真实应用误判成系统浮层」**（fok0025）—— 同样由真机暴露：
+  原来用 `getLaunchIntentForPackage(pkg) != null`（有没有桌面入口）当通用判据，但**联想平板(ZUI)** 上
+  `com.android.settings` 会被判成"没有入口"（而 `cmd package resolve-activity -a MAIN -c LAUNCHER` 能解析出
+  `com.android.settings/.Settings`，说明该 API 在该 ROM 上不可靠）⇒ 设置页被当成系统浮层忽略，
+  "从设置页被广告拉进快应用"**静默失效**（日志里 `prev=com.zui.launcher`，而设置明明在前台）。
+  实测 `com.android.camera / gallery3d / documentsui` 也都没有桌面入口。
+  现在改用**"有没有任何 Activity"**（与 GKD 自己的 `AppInfo.checkHasActivity` 同一套判据）：
+  只有完全没有 Activity 的纯服务/插件包才算系统浮层，真实应用一律不受影响。
+- **新增「看到引擎但没拦」的诊断日志**（fok0024）：引擎被识别时直接记录
+  `QuickApp seen engine=… prev=… guardOn=… prevIsSystemSurface=… engines=…`，
+  让这个功能不再是黑盒（本次就是靠它一眼定位到 `prev=com.zui.launcher`）。
+- **新增控制面板开关陷阱靶** `PanelSwitchTrapActivity`（测试 App）：3 个与真机同形的
+  `Switch(text=关闭)` + 可选真按钮，用于复现/回归「在系统操作面板上误触」。
+
+## v115 / 1.12.2
+
+应用内版本号 `1.12.2-fok0022`（versionCode 115）
+
+- **修复「在系统操作面板上误触」**（用户报："上拉到控制面板时会触发什么东西，关掉 GKD 就不会触发"）
+  - **取证**（vivo / Android 16，`gkd-20261002.log` + 控制面板界面树）：控制面板里有 **7 个可点开关**，
+    节点形态是 `class=android.widget.Switch`、**`text=关闭`**、**功能名在 `content-desc` 里**
+    （飞行模式 / WLAN / 振动模式 / 静音模式 / 省电模式 / 手电筒 / **GKD特调版（本 App 的磁贴）**），
+    而「防摇一摇广告」找关闭按钮的判据当时是 `clickable && text.contains("关闭")`
+    ⇒ 一天误点 **40+ 次**（`ShakeGuard handled pkg=com.android.systemui via click=关闭`）。
+    **点到 GKD 自己的磁贴时直接把无障碍关掉了**（`A11yAutoGuard manualOff=true` + "无障碍已关闭"，
+    而手动关闭语义是"守护不拉回" ⇒ 手机长时间处于无保护状态）。
+    同一形态还误伤了应用内的功能开关：`tv.danmaku.bili via click=关闭弹幕`、`com.android.camera via click=超微距,关闭`。
+  - **三条通道**：① 面板的窗口事件没有过滤系统界面；② 事件来自应用 A、而 `rootInActiveWindow` 是面板的树时仍照扫；
+    ③ "关闭"是**包含匹配** —— 而开关的状态文字恰好就叫"关闭"。
+    另外「摇一摇跳转防护」把用户**上滑**产生的 `com.vivo.upslide`（上滑面板）与 `com.vivo.hiboard`（负一屏）
+    当成"跳到了别的应用"，一天按了 **7 次返回键 + 拉起原应用**。
+  - **修复**：新增共用的 `service/SystemSurfaces.kt`，把系统窗口分成**瞬时浮层**（状态栏/通知/转场/无桌面入口的系统包
+    —— 忽略但**不清空**源应用，保住 fok0021 的修复）与**用户离开应用的面板**（桌面/上滑面板/负一屏 —— 结束开屏计时）
+    两类；`ShakeGuard` 只扫**自己应用**的窗口、**开关类控件一律不点**、"关闭"只认关闭类短语；
+    `JumpGuard` / `FakeSkipGuard` / `QuickAppGuard` 不再把系统面板当跳转目标或落点。
+    判据除了厂商包名清单，还有一条与 ROM 无关的：**没有桌面启动入口的包 = 系统组件**（新 ROM 自动生效）。
+    顺带删除 v104 遗留的惰性模块 `SensorOrientationGuard`（该 ROM 上没有「获取设备方向」appop，只在每次切换应用时刷一行日志）。
+  - **验证**（MuMu，新靶 `PanelSwitchTrapActivity`：3 个与真机同形的 `Switch(text=关闭)` + 一个真正可点的「跳过广告」）：
+    旧版 fok0020 —— `ShakeGuard handled ... via click=关闭` + 靶侧 `SWITCH-TOGGLED total=1`（**复现**）；
+    新版 fok0022 同一页面 —— `ShakeGuard skip ... reason=no-close-button`、靶侧 **开关 0 次**；
+    页面里再放真按钮时 —— `ShakeGuard handled ... via click=跳过广告`（**真按钮照点，无回归**）。
+
 ## v114 / 1.12.2
 
 应用内版本号 `1.12.2-fok0021`（versionCode 114）
