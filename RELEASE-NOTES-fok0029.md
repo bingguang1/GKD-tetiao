@@ -67,10 +67,11 @@ Kotlin 编译器对 `private` 未使用项本来就会告警（本仓这类告�
 | 文件 | 说明 |
 |---|---|
 | `gkd-tejiao-v1.12.2-fok0029.apk` | 软件本体（**自签名**，与官方 GKD 签名不同 ⇒ 装过官方版需先卸载） |
-| `一键ADB配置开机自启.bat` + `adb-oneclick-setup.ps1` | 电脑端一键配置（授权 / 开无障碍 / 电池白名单 / 自检），双击即用；.ps1 是它的实现，**必须一起下载** |
-| `一键关闭快应用.bat` + `quickapp-off.ps1` | 电脑端一键关闭快应用引擎（识别 → 停用 → 掐安装权限 → 复验），带 `-WhatIf` 预览 / `-Restore` 还原 |
+| `oneclick-adb-setup-autostart.bat` + `adb-oneclick-setup.ps1` | 电脑端一键配置（授权 / 开无障碍 / 电池白名单 / 自检 / 可选重启实测），双击 .bat 即用 |
+| `oneclick-close-quickapp.bat` + `quickapp-off.ps1` | 电脑端一键关闭快应用引擎（识别 → 停用 → 掐安装权限 → 复验），支持 `-WhatIf` 预览 / `-Restore` 还原 |
 
-> 两个 `.bat` 都必须和同名的 `.ps1` 放在**同一个目录**里运行。
+> ⚠️ **每个 `.bat` 都必须和它配套的 `.ps1` 放在同一个目录里**（.bat 只是个启动器，真正干活的是 .ps1）。
+> 文件名用 ASCII 是因为 GitHub 会把资产名里的中文替换掉（中文名会被压成 `ADB.bat` / `default.bat` 这种）。
 
 ## 安装
 
