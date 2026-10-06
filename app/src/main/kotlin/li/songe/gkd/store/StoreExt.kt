@@ -87,6 +87,21 @@ val jumpGuardAppListFlow by lazy {
 }
 
 /**
+ * fork(v119): 「设备动作与方向」权限已设为「仅开屏禁止」的应用清单(用户自报)。
+ *
+ * 为什么是"自报": 该系统开关是 ROM 自己的权限框架(vivo 上不是标准 AppOps op, 见 §10.5 取证),
+ * 第三方应用**读不到也写不了**, 所以 GKD 只能记录"用户说设过了", 用于统计/提醒别漏。
+ * 默认为空。见 [li.songe.gkd.service.DeviceOrientationGuard] 与「设备动作与方向」页。
+ */
+val deviceOrientationAppListFlow by lazy {
+    createTextFlow(
+        key = "device_orientation_app_list",
+        decode = { it?.let(AppListString::decode) ?: emptySet() },
+        encode = AppListString::encode,
+    )
+}
+
+/**
  * fork(v107): 关闭快应用——「快应用引擎」名单(换行分隔包名)。
  * 内容是**识别结果 ∪ 用户手动添加**: [li.songe.gkd.service.QuickAppRegistry] 每次识别后把
  * 探测到的引擎写进来(这样"已停用"的引擎不会因为不再响应 hap:// 而从列表里消失, 用户还能恢复它),
@@ -118,6 +133,7 @@ fun initStore() = appScope.launchTry(Dispatchers.IO) {
     a11yScopeAppListFlow.value
     guardAssocAppListFlow.value
     jumpGuardAppListFlow.value
+    deviceOrientationAppListFlow.value
     quickAppEngineListFlow.value
     gkdStartCommandText
     ExposeService.initCommandFile()

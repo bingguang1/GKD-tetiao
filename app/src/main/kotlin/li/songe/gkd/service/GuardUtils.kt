@@ -61,3 +61,19 @@ internal fun appLabel(appId: String): String = runCatching {
     val pm = app.packageManager
     pm.getApplicationLabel(pm.getApplicationInfo(appId, 0)).toString()
 }.getOrNull()?.takeIf { it.isNotEmpty() } ?: appId
+
+/**
+ * "开屏/广告页"的页面类名特征词(小写匹配)。
+ *
+ * v121 起从 [JumpGuard] 私有移到共用: [JumpGuard](开屏跳转的兜底时长)与 [ShakeGuard](点击前的"广告证据")
+ * 必须用**同一份**判据 —— 否则同一个页面在一个模块里算"开屏页"、在另一个模块里不算, 用户看到的行为就会自相矛盾。
+ */
+private val splashPageWords =
+    arrayOf("splash", "advert", "adactivity", ".ads.", "welcome", "guideactivity")
+
+/** 这个页面类名像不像"开屏/广告页"(见 [splashPageWords]) */
+internal fun isSplashLikePage(activity: String?): Boolean {
+    if (activity.isNullOrEmpty()) return false
+    val lower = activity.lowercase()
+    return splashPageWords.any { lower.contains(it) }
+}

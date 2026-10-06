@@ -39,15 +39,6 @@ class SafeAppOpsService(
         value.setMode(code, android.os.Process.myUid(), META.appId, mode)
     }
 
-    /** 设置**其它应用**的 appop —— 需要 shell(MANAGE_APP_OPS_MODES), 由 Shizuku 提供 */
-    fun setModeForPackage(code: Int, uid: Int, packageName: String, mode: Int) = safeInvokeShizuku {
-        value.setMode(code, uid, packageName, mode)
-    }
-
-    fun checkMode(code: Int, uid: Int, packageName: String): Int? = safeInvokeShizuku {
-        value.checkOperation(code, uid, packageName)
-    }
-
     private fun setAllowSelfMode(code: Int) {
         val m = checkOperation(code = code) ?: return
         if (m == AppOpsManager.MODE_ALLOWED) {

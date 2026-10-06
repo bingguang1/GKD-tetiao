@@ -178,6 +178,13 @@ object FakeSkipGuard {
             )
             return
         }
+        // ★ v121: 落到"用户主动发起的意图目标"(相机/相册/文件选择器/输入法) → 不算假跳过误点,
+        //   不按返回键、也不把该 App 记入降级名单 —— 否则用户点了"跳过"之后顺手去拍照/选图,
+        //   会被判成 misclick 并被拽回原应用(与 ShakeGuard v121 的那类"闪回"同源)。
+        if (SystemSurfaces.isUserIntentTarget(pkgAfter)) {
+            LogUtils.d("$LOG_TAG landed-user-intent pkg=$pkgBefore -> $pkgAfter target=$target (不动作)")
+            return
+        }
         if (pkgAfter.isEmpty() || SystemSurfaces.isSystemSurface(pkgAfter)) {
             // 回到桌面/系统界面(含状态栏、通知、上滑面板、负一屏): 不抢返回键(可能只是用户自己按了 Home
             // 或上滑打开了面板), 仅累计记录。

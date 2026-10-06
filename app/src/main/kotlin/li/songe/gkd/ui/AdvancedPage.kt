@@ -594,6 +594,13 @@ fun AdvancedPage() {
                 color = MaterialTheme.colorScheme.primary,
             )
             SettingItem(
+                title = "运行日志",
+                subtitle = "在手机上直接看运行日志(守卫决策/异常), 可筛选、复制、清空",
+                onClick = {
+                    mainVm.navigatePage(LogFileRoute)
+                }
+            )
+            SettingItem(
                 title = "界面日志",
                 subtitle = "界面切换日志",
                 onClick = {

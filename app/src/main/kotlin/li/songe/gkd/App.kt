@@ -95,7 +95,7 @@ data class AppMeta(
     val appId: String = app.packageName!!,
     val appName: String = app.getString(R.string.app_name)
 ) {
-    val commitUrl = "https://github.com/bingguang1/gkd-tejiao/".run {
+    val commitUrl = "https://github.com/bingguang1/GKD-tetiao/".run {
         plus(if (tagName != null) "tree/$tagName" else "commit/$commitId")
     }
     // 本 fork 关闭应用内检测更新: 上游更新源(registry.npmmirror.com/@gkd-kit/app)发布的是官方 GKD,

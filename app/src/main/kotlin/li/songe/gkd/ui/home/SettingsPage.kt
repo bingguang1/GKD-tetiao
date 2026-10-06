@@ -63,12 +63,14 @@ import li.songe.gkd.permission.foregroundServiceSpecialUseState
 import li.songe.gkd.permission.ignoreBatteryOptimizationsState
 import li.songe.gkd.permission.notificationState
 import li.songe.gkd.permission.requiredPermission
+import li.songe.gkd.service.DeviceOrientationGuard
 import li.songe.gkd.service.FakeSkipGuard
 import li.songe.gkd.service.QuickAppRegistry
 import li.songe.gkd.service.StatusService
 import li.songe.gkd.service.TrackService
 import li.songe.gkd.service.fixRestartAutomatorService
 import li.songe.gkd.shizuku.shizukuContextFlow
+import li.songe.gkd.store.deviceOrientationAppListFlow
 import li.songe.gkd.store.guardAssocAppListFlow
 import li.songe.gkd.store.jumpGuardAppListFlow
 import li.songe.gkd.store.storeFlow
@@ -76,6 +78,7 @@ import li.songe.gkd.ui.AboutRoute
 import li.songe.gkd.ui.AdvancedPageRoute
 import li.songe.gkd.ui.BlockA11yAppListRoute
 import li.songe.gkd.ui.GuardAssocAppListRoute
+import li.songe.gkd.ui.DeviceOrientationAppListRoute
 import li.songe.gkd.ui.JumpGuardAppListRoute
 import li.songe.gkd.ui.QuickAppEngineRoute
 import li.songe.gkd.ui.component.CustomOutlinedTextField
@@ -448,7 +451,8 @@ fun useSettingsPage(): ScaffoldExt {
 
             TextSwitch(
                 title = "防摇一摇广告",
-                subtitle = "打开应用后的「开屏时长」内, 自动点掉广告上真正可点的\"跳过/关闭\"按钮(免root); 已经被晃走的情况由下面的「摇一摇跳转防护」退回来",
+                subtitle = "兜底手段: 打开应用后的「开屏时长」内, 自动点掉广告上真正可点的\"跳过/关闭\"按钮(免root); " +
+                    "已经被晃走的情况由下面的「摇一摇跳转防护」退回来。根因防护见下面的「设备动作与方向」",
                 checked = store.shakeGuard,
                 onClickLabel = "切换防摇一摇广告开关",
                 onCheckedChange = {
@@ -456,6 +460,30 @@ fun useSettingsPage(): ScaffoldExt {
                         shakeGuard = it
                     )
                 })
+
+            // fork(v119): 「防摇一摇」的根因防护入口 = 系统权限「访问/获取设备动作与方向」→「仅开屏时禁止」。
+            // 这个开关在 ROM 自己的权限框架里(vivo 上不是标准 AppOps op, 见 §10.5), GKD 读不到也写不了,
+            // 所以这里给的是"引导 + 自检 + 清单"入口, 真正的拦截由系统完成。
+            // ★★ 真机实测(2026-10-02)教训: 这一行**不能**挂在 `store.shakeGuard` 的 AnimatedVisibility 里 ——
+            //    用户手机上 `shakeGuard=false`(把「防摇一摇广告」这个**兜底**关掉了), 于是根因防护的入口**整个消失**,
+            //    用户根本找不到它。两者是**不同机制**(一个点广告、一个掐传感器), 入口必须常显。
+            run {
+                val orientationList by deviceOrientationAppListFlow.collectAsState()
+                val itemName = DeviceOrientationGuard.itemName()
+                val optionName = DeviceOrientationGuard.targetOptionName()
+                SettingItem(
+                    title = "设备动作与方向 (${orientationList.size})",
+                    subtitle = if (orientationList.isEmpty()) {
+                        "根因防护: 在系统里把「$itemName」设为「$optionName」" +
+                            "—— 只在开屏那几秒拒绝传感器, 应用内摇一摇照常可用; 点击进入引导"
+                    } else {
+                        "已记录 ${orientationList.size} 个应用设为「$optionName」, 点击查看/继续设置"
+                    },
+                    onClickLabel = "进入设备动作与方向页面",
+                    onClick = {
+                        mainVm.navigatePage(DeviceOrientationAppListRoute)
+                    })
+            }
 
             TextSwitch(
                 title = "无障碍自动守护",

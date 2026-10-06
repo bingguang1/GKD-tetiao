@@ -32,9 +32,23 @@ import java.util.concurrent.atomic.AtomicBoolean
  * - 进程被系统彻底杀死后无法"感知"应用打开; 此时靠 自适应闹钟(未运行 2 分钟一发)+
  *   开机/亮屏/解锁触发 把进程拉起来再恢复 —— 本守护一旦随进程运行即恢复实时性。
  * - 进程被用户"强行停止/一键清理"(stopped 状态)后, 系统禁止任何广播/闹钟, 只能等下次手动打开 GKD。
+ *
+ * ★ v122 修「关联名单形同虚设」: 原来命中名单的分支**只打了一行日志**, 真正干活的还是紧随其后的
+ *   无条件 `autoEnsure()`(**还有 5 秒节流**) —— 于是「关联应用守护」开关与「守护关联应用」名单
+ *   对行为**没有任何影响**, 与设置页文案"打开关联的 App 时若无障碍被清除立即恢复"完全对不上。
+ *   现在命中名单时**直接** `ensureEnabled()`(不受节流、不等下一轮 4.5 秒), 名单和开关才真正有用。
  */
 object AssocAppGuard {
     private val started = AtomicBoolean(false)
+
+    /** 熄屏时的轮询间隔(熄屏时既没有"打开应用"也没有可读的界面, 只需偶尔醒来看看) */
+    private const val SCREEN_OFF_INTERVAL_MS = 10_000L
+
+    /** 无障碍**不在运行**时的抢救间隔 */
+    private const val RESCUE_INTERVAL_MS = 4_500L
+
+    /** 无障碍正常时的巡检间隔(真正掉线由 ContentObserver / 闹钟 / 亮屏触发立刻兜住) */
+    private const val IDLE_INTERVAL_MS = 5_000L
 
     /** 在 Application.onCreate 调用一次; 幂等 */
     fun start() {
@@ -49,31 +63,46 @@ object AssocAppGuard {
             try {
                 if (!app.powerManager.isInteractive) {
                     // 熄屏: 不轮询, 等 SCREEN_ON / 闹钟唤醒
-                    delay(10_000)
+                    delay(SCREEN_OFF_INTERVAL_MS)
                     continue
                 }
                 val store = storeFlow.value
                 val guardExpected = store.enableAutomator && store.useA11y &&
                         store.autoRestoreA11y && !store.manualA11yOff &&
                         currentAppUseA11y && !currentAppBlocked
-                if (guardExpected && !A11yService.isRunning.value) {
-                    // 通道1: 关联 App 前台 → 立即恢复(带日志便于排障)
-                    val assocSet = actualGuardAssocAppList
-                    if (store.enableGuardAssoc && assocSet.isNotEmpty() && hasUsageAccess()) {
-                        val fg = queryForegroundPkg()
-                        if (fg != null && fg in assocSet) {
-                            LogUtils.d("GuardAssoc trigger pkg=$fg")
-                        }
-                    }
-                    // 通用快检: 进程存活时的"被系统清除立即恢复"(autoEnsure 自带 5s 节流 + manualOff/开关尊重)
-                    A11yAutoGuard.autoEnsure()
-                    delay(4_500)
+                if (!guardExpected) {
+                    delay(IDLE_INTERVAL_MS)
                     continue
                 }
-                delay(2_000)
+                if (A11yService.isRunning.value) {
+                    // 无障碍正常 → 没有要抢救的东西(真掉线时 ContentObserver / 闹钟 / 亮屏会立刻拉起)
+                    delay(IDLE_INTERVAL_MS)
+                    continue
+                }
+                // ---- 无障碍不在运行, 需要抢救 ----
+                // ★ v122: 关联名单**真的**起作用 —— 名单里的 App 回到前台时**立刻**恢复
+                //   (直接调 ensureEnabled, 不走 autoEnsure 的 5 秒节流, 也不等这一轮 4.5 秒)。
+                //   改之前这里只打了一行日志、真正干活的还是下面那句无条件 autoEnsure() ——
+                //   于是"关联应用守护/守护关联应用"这个开关和名单对行为**没有任何影响**,
+                //   与设置页写的"打开关联的 App 时若无障碍被清除立即恢复"完全对不上。
+                if (store.enableGuardAssoc) {
+                    val assocSet = actualGuardAssocAppList
+                    if (assocSet.isNotEmpty() && hasUsageAccess()) {
+                        val fg = queryForegroundPkg()
+                        if (fg != null && fg in assocSet) {
+                            LogUtils.d("GuardAssoc trigger pkg=$fg, ensure now")
+                            A11yAutoGuard.ensureEnabled()
+                            delay(RESCUE_INTERVAL_MS)
+                            continue
+                        }
+                    }
+                }
+                // 通用快检: 进程存活时的"被系统清除立即恢复"(autoEnsure 自带 5s 节流 + manualOff/开关尊重)
+                A11yAutoGuard.autoEnsure()
+                delay(RESCUE_INTERVAL_MS)
             } catch (t: Throwable) {
                 LogUtils.d("GuardAssoc", t)
-                delay(10_000)
+                delay(SCREEN_OFF_INTERVAL_MS)
             }
         }
     }
@@ -81,6 +110,10 @@ object AssocAppGuard {
     private fun hasUsageAccess(): Boolean {
         return try {
             val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // 用 unsafeCheckOpNoThrow 而不是 noteOpNoThrow: 我们只是**读**权限状态,
+                // 后者会把这次查询记成一次"访问", 反而污染使用情况统计(API 29 起被标记 deprecation
+                // 只是因为"不记录", 对本用途恰好是对的)
+                @Suppress("DEPRECATION")
                 app.appOpsManager.unsafeCheckOpNoThrow(
                     AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), app.packageName
                 )
@@ -107,6 +140,9 @@ object AssocAppGuard {
             var fg: String? = null
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
+                // MOVE_TO_FOREGROUND 在 API 29 起改名 ACTIVITY_RESUMED(数值相同, 都是 1);
+                // 这里保留旧名是为了在低版本上也编译/运行一致(v122 只加注解, 不改行为)
+                @Suppress("DEPRECATION")
                 if (event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) {
                     fg = event.packageName
                 }

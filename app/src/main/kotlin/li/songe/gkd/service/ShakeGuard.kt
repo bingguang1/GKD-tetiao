@@ -7,7 +7,13 @@ import li.songe.gkd.store.storeFlow
 import li.songe.gkd.util.LogUtils
 
 /**
- * 免 root「防摇一摇广告 / 开屏自动关闭」内置防护。
+ * 免 root「防摇一摇广告 / 开屏自动关闭」内置防护 —— **v119 起定位为「兜底」**。
+ *
+ * ★ v119 起「防摇一摇」的**根因防护**改由系统层负责: 把应用的「获取设备动作与方向」权限设为
+ *   **「仅开屏禁止」**(vivo OriginOS 5 / 小米 HyperOS 3 起提供) —— 开屏那几秒读不到传感器, 广告晃不动;
+ *   第三方应用无法程序化设置(取证见 §10.5), 所以 GKD 只做引导/自检/清单, 见
+ *   [DeviceOrientationGuard] 与「设备动作与方向」页。**本模块保留为兜底**: 系统没这个选项、
+ *   或用户没设的应用, 仍然靠它把开屏广告点掉。
  *
  * 做什么: 应用刚打开(或刚换到开屏页)的**开屏时长**内, 若屏幕上出现**真正可点**的
  *   "跳过 / 关闭 / 知道了"按钮, 就替你点掉它 —— 在摇一摇把页面晃走之前先把广告关掉。
@@ -29,6 +35,21 @@ import li.songe.gkd.util.LogUtils
  *
  * 与其它模块的分工: 本模块**事前**把广告关掉; 已经被晃走的情况由 [JumpGuard] 事后退回;
  *   [FakeSkipGuard] 负责"规则点过之后落点不对"的回退。三者互不重叠。
+ *
+ * ★★★ v121 修「用微信时开相机 / 开小程序会闪回」(用户报的回归, 与 fok0014 对比后定位):
+ *   真机日志取证(`files/log/gkd-20261002.log`): `ShakeGuard handled pkg=com.tencent.mm via click=关闭`
+ *   **一天 21 次**(19:39~20:27 一批, 23:10~23:12 又 10 次 —— 那是我们在 22:38 装完 fok0026 之后),
+ *   全部 `shakeHint=false`(`window=1500ms`)。用户看到的就是"相机/小程序界面闪一下又退回原来的应用"。
+ *   两个成因叠加:
+ *     ① **v109 把"必须看到摇一摇提示词"这个前提去掉了**(当年为了修"4 天 0 次生效"), 于是任何**可点的"关闭"**
+ *        都成了候选 —— 而微信小程序右上角的关闭、相机界面的关闭都叫"关闭";
+ *     ② **v109 让"同应用内换页也重置开屏窗口"** —— 打开小程序/相机正好是一次换页, 窗口立刻"重新上膛",
+ *        于是每开一次就被点一次(日志里 4 秒内连点 5 次就是这么来的)。
+ *   **fok0014 之所以没这个问题**: 那版**强制要求同现"摇一摇提示词"**才动手, 微信的正常界面里没有这种提示词 ⇒ 从不误点。
+ *   现在的做法(既保留广告能力、又不碰正常界面): **点击前必须有广告证据** ——
+ *     命中"跳过/skip"= 本身就是广告特征(直接点) · 命中自带"广告"字样的短语(关闭广告/关闭浮层…)= 算证据 ·
+ *     **裸"关闭/知道了" → 必须本窗口看到摇一摇提示词, 或当前页面像开屏/广告页([isSplashLikePage])**,
+ *     否则只记 `no-ad-evidence` 日志、绝不动手。
  *
  * ★★ fok0022 修「在系统操作面板上误触」(用户报: "上拉到控制面板时会触发东西, 关掉 GKD 就不触发"):
  *   真机取证(vivo V2238A / `gkd-20261002.log` + 控制面板界面树) 说明旧版有三条通道会点到面板:
@@ -64,6 +85,16 @@ object ShakeGuard {
 
     /** 开关的"状态文字": 这类文字**单独出现**时描述的是某个功能的状态, 不是关闭按钮 */
     private val stateWords = setOf("关闭", "關閉", "开启", "已关闭", "已开启", "打开", "关闭中", "开启中")
+
+    /**
+     * ★ v121: **自带"广告"字样**的关闭短语 —— 这类文字本身就是"这是广告"的证据, 不需要额外证据就能点。
+     * (故意比 [closePhrases] 窄: "关闭视频/关闭图片/关闭应用/关闭小程序/关闭页面" 这些在**正常界面**里也会出现,
+     *  不能当广告证据 —— 实测微信小程序里就有"关闭小程序", 点了就等于把用户的小程序关掉。)
+     */
+    private val adSpecificClosePhrases = arrayOf(
+        "关闭广告", "關閉廣告", "close ad", "关闭弹窗", "关闭浮层", "关闭遮罩",
+        "关闭活动", "关闭下载", "关闭安装",
+    )
 
     /** 开关类控件(控制面板磁贴、设置里的开关…): 其文字/desc 描述状态, 一律不点 */
     private val toggleClassWords =
@@ -133,7 +164,7 @@ object ShakeGuard {
         try {
             // 注意: 不 recycle rootInActiveWindow —— 它由系统与 GKD 规则引擎共用, 主动回收可能让
             // 同一次事件里的规则匹配拿到已回收的节点(旧版是回收的, 本次收紧为只回收自己收集的子节点)
-            scanAndHandle(root, windowMs)
+            scanAndHandle(root, windowMs, isSplashLikePage(openActivity))
         } catch (e: Throwable) {
             LogUtils.d("ShakeGuard", e)
         }
@@ -142,7 +173,7 @@ object ShakeGuard {
     /** 节点文本是否像一句"短提示"(过长的正文/聊天内容不参与命中) */
     private fun shortText(t: String): Boolean = t.isNotEmpty() && t.length <= MAX_TEXT_LEN
 
-    private fun scanAndHandle(root: AccessibilityNodeInfo, windowMs: Long) {
+    private fun scanAndHandle(root: AccessibilityNodeInfo, windowMs: Long, splashLike: Boolean) {
         var shakeFound = false
         var bestClose: AccessibilityNodeInfo? = null
         var bestClosePriority = -1
@@ -201,6 +232,20 @@ object ShakeGuard {
                 logSkip("rule-acted-${ruleAgo}ms shakeHint=$shakeFound close=$bestCloseLabel")
                 return
             }
+            // ★★★ v121 核心修复: **点击前必须有"这是开屏广告"的证据**(真机回归, 见类注释 ★★★)
+            //   裸 "关闭"/"知道了" 这两类文字在**正常界面**上太常见了 —— 微信小程序右上角的关闭、相机界面的关闭
+            //   都被它点掉过(`ShakeGuard handled pkg=com.tencent.mm via click=关闭` 一天 21 次, 其中 10 次发生在
+            //   用户开小程序的那 80 秒里)。所以:
+            //     · 命中"跳过/skip" → 本身就是广告特征, 直接点(不需要别的证据);
+            //     · 命中 [closePhrases] 这种**自带广告字样**的短语(关闭广告/关闭浮层…) → 也算证据;
+            //     · 裸 "关闭/知道了" → 必须另有证据: 本窗口里看到了摇一摇提示词, **或**当前页面像开屏/广告页。
+            //   这正是 fok0014(用户说"没这个问题"的那版)的行为: 当年强制要求"摇一摇提示词"才动手 ——
+            //   v109 为了修"4 天 0 次生效"把它去掉了, 结果把正常界面的"关闭"也一起点了。
+            val adEvidence = shakeFound || splashLike || isAdSpecificClose(bestCloseLabel)
+            if (bestClosePriority >= 1 && !adEvidence) {
+                logSkip("no-ad-evidence close=$bestCloseLabel shakeHint=$shakeFound splashLike=$splashLike nodes=$visited")
+                return
+            }
             val clicked = runCatching {
                 target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             }.getOrDefault(false)
@@ -225,6 +270,12 @@ object ShakeGuard {
         if (node.isCheckable) return true
         val cls = runCatching { node.className?.toString() }.getOrNull() ?: return false
         return toggleClassWords.any { cls.contains(it) }
+    }
+
+    /** 文字里自带"广告"字样(见 [adSpecificClosePhrases]) → 本身就是广告证据 */
+    private fun isAdSpecificClose(label: String): Boolean {
+        val lower = label.lowercase()
+        return adSpecificClosePhrases.any { lower.contains(it.lowercase()) }
     }
 
     /**

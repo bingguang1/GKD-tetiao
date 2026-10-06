@@ -98,12 +98,16 @@ import li.songe.gkd.ui.BlockA11yAppListPage
 import li.songe.gkd.ui.BlockA11yAppListRoute
 import li.songe.gkd.ui.CrashReportPage
 import li.songe.gkd.ui.CrashReportRoute
+import li.songe.gkd.ui.DeviceOrientationAppListPage
+import li.songe.gkd.ui.DeviceOrientationAppListRoute
 import li.songe.gkd.ui.EditBlockAppListPage
 import li.songe.gkd.ui.EditBlockAppListRoute
 import li.songe.gkd.ui.GuardAssocAppListPage
 import li.songe.gkd.ui.GuardAssocAppListRoute
 import li.songe.gkd.ui.JumpGuardAppListPage
 import li.songe.gkd.ui.JumpGuardAppListRoute
+import li.songe.gkd.ui.LogFilePage
+import li.songe.gkd.ui.LogFileRoute
 import li.songe.gkd.ui.QuickAppEnginePage
 import li.songe.gkd.ui.QuickAppEnginePickPage
 import li.songe.gkd.ui.QuickAppEnginePickRoute
@@ -295,6 +299,8 @@ class MainActivity : ComponentActivity() {
                             entry<EditBlockAppListRoute> { EditBlockAppListPage() }
                             entry<GuardAssocAppListRoute> { GuardAssocAppListPage() }
                             entry<JumpGuardAppListRoute> { JumpGuardAppListPage() }
+                            entry<LogFileRoute> { LogFilePage() }
+                            entry<DeviceOrientationAppListRoute> { DeviceOrientationAppListPage() }
                             entry<QuickAppEngineRoute> { QuickAppEnginePage() }
                             entry<QuickAppEnginePickRoute> { QuickAppEnginePickPage() }
                             entry<SlowGroupRoute> { SlowGroupPage() }

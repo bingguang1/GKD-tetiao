@@ -61,7 +61,6 @@ data class SettingsStore(
     val appRuleSort: Int = RuleSortOption.ByDefault.value,
     val subsAppSort: Int = AppSortOption.ByUsedTime.value,
     val subsCategorySort: Int = AppSortOption.ByUsedTime.value,
-    val subsAppShowUninstall: Boolean = false,
     val subsAppGroupType: Int = AppGroupOption.UserGroup.value or AppGroupOption.SystemGroup.value,
     val subsCategoryGroupType: Int = AppGroupOption.UserGroup.value or AppGroupOption.SystemGroup.value,
     val subsAppShowBlock: Boolean = false,

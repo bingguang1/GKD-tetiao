@@ -108,7 +108,6 @@ sealed class ResolvedRule(
         }
 
     private var preRules = emptySet<ResolvedRule>()
-    val hasNext = group.rules.any { r -> r.preKeys?.any { k -> k == rule.key } == true }
 
     private var actionDelayTriggerTime = atomic(0L)
     val actionDelayJob = atomic<Job?>(null)

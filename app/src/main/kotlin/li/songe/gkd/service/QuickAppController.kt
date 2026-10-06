@@ -31,9 +31,6 @@ object QuickAppController {
 
     private const val TAG = "QuickApp"
 
-    fun available(): Boolean =
-        storeFlow.value.enableShizuku && shizukuContextFlow.value.serviceWrapper != null
-
     private fun wrapper(): UserServiceWrapper? =
         if (storeFlow.value.enableShizuku) shizukuContextFlow.value.serviceWrapper else null
 

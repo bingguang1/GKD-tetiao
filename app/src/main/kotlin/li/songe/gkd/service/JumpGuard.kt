@@ -87,8 +87,9 @@ object JumpGuard {
      */
     private const val SPLASH_PAGE_WINDOW_MS = 15_000L
 
-    /** 页面类名像"开屏/广告页"的特征词(小写匹配) */
-    private val splashPageWords = arrayOf("splash", "advert", "adactivity", ".ads.", "welcome", "guideactivity")
+    // 页面类名像不像"开屏/广告页"的判据 v121 起移到 GuardUtils.isSplashLikePage(与 ShakeGuard 共用同一份,
+    // 免得同一页面在一个模块里算开屏页、在另一个模块里不算), 调用点见 effectiveWindow()。
+    // SPLASH_PAGE_WINDOW_MS 仍留在这里: 它是"从开屏页跳走时放宽到多久"这个策略, 只属于本模块。
 
     @Volatile private var curPkg: String? = null
     @Volatile private var curActivity: String? = null
@@ -220,13 +221,8 @@ object JumpGuard {
     /** 这个时长是否该判: 用户设定值 vs 开屏/广告页的兜底值(见 SPLASH_PAGE_WINDOW_MS) */
     private fun effectiveWindow(prevActivity: String?): Long {
         val base = windowMs()
+        // isSplashLikePage 是 GuardUtils 里的顶层函数(v121 起与 ShakeGuard 共用同一份判据)
         return if (isSplashLikePage(prevActivity)) maxOf(base, SPLASH_PAGE_WINDOW_MS) else base
-    }
-
-    private fun isSplashLikePage(activity: String?): Boolean {
-        if (activity.isNullOrEmpty()) return false
-        val lower = activity.lowercase()
-        return splashPageWords.any { lower.contains(it) }
     }
 
     // ---------------- 内部 ----------------
@@ -247,6 +243,10 @@ object JumpGuard {
         // 跳到桌面/系统界面/上滑面板 → 用户自己的操作(Home、上滑、负一屏), 不抢返回键
         // (fok0022 起判据换成共用的 SystemSurfaces, 不再只认 launcher/systemui 两个包名)
         if (SystemSurfaces.isSystemSurface(newPkg)) return
+        // ★ v121: 相机/相册/文件选择器/输入法 = **用户主动发起的意图目标**, 不是"广告把我带走了"。
+        //   取证: 20:52:31 `千问 -> com.baidu.input_vivo`(点开键盘)被按了返回键; 用户视角就是"键盘一闪没了"。
+        //   广告落地页从来不是相机/相册/选择器, 所以这个排除几乎不损失拦截能力。
+        if (SystemSurfaces.isUserIntentTarget(newPkg)) return
         // ① 必须发生在"刚打开"的窗口内(时长由用户设定; 源页面像开屏/广告页时用兜底值, 见 effectiveWindow)
         val window = effectiveWindow(prevActivity)
         val gap = now - prevRef

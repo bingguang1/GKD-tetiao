@@ -39,7 +39,6 @@ data class ShowGroupState(
     val appId: String? = null,
     val groupKey: Int? = null,
     val pageAppId: String? = null,
-    val addAppRule: Boolean = false,
 ) {
     val groupType: Int
         get() = if (appId != null) {

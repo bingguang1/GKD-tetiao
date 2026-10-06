@@ -85,10 +85,13 @@ fun QuickAppEnginePage() {
             item(key = "tip") {
                 Text(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                    text = "快应用是华为/荣耀/小米/OPPO/vivo 等厂商预装的\"免安装小程序\"运行环境(原生渲染, 不是网页)。" +
+                    text = "快应用是华为/荣耀/小米/OPPO/vivo/联想 等厂商预装的\"免安装小程序\"运行环境(原生渲染, 不是网页)。" +
                         "流氓广告常借它把用户从开屏广告拉进快应用广告页并自动下载 APK。\n" +
-                        "「停用」= 系统层面关掉这个引擎(可随时恢复, 推荐); 「禁止安装应用」= 让引擎没法装 APK。" +
-                        "两者都需要 shell 权限: 连了 Shizuku 可在这里直接执行, 否则用下面给的一键 adb 命令。",
+                        "「禁止安装应用」= 让引擎没法装 APK —— 多数 ROM 免 root 就能成功, 建议先用它; " +
+                        "「停用」= 系统层面关掉这个引擎(可随时恢复), 但部分 ROM 只允许 root 停用系统应用: " +
+                        "实测 vivo OriginOS 报 `Cannot disable ... no root permission`, 而联想 ZUXOS / AOSP 可以成功。" +
+                        "两者都需要 shell 权限: 连了 Shizuku 可在这里直接执行, 否则用下面给的一键 adb 命令, " +
+                        "或在电脑上双击 `release\\一键关闭快应用.bat`(自动识别引擎 + 逐条执行 + 如实报错, 可用 -Restore 还原)。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

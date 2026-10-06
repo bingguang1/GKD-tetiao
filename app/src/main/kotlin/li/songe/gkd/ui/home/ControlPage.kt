@@ -57,6 +57,7 @@ import li.songe.gkd.ui.ActionLogRoute
 import li.songe.gkd.ui.ActivityLogRoute
 import li.songe.gkd.ui.AppConfigRoute
 import li.songe.gkd.ui.AuthA11yRoute
+import li.songe.gkd.ui.LogFileRoute
 import li.songe.gkd.ui.WebViewRoute
 import li.songe.gkd.ui.component.GroupNameText
 import li.songe.gkd.ui.component.PerfIcon
@@ -230,6 +231,15 @@ fun useControlPage(): ScaffoldExt {
                 onClickLabel = "打开触发记录页面",
                 onClick = {
                     mainVm.navigatePage(ActionLogRoute())
+                })
+
+            PageItemCard(
+                title = "运行日志",
+                subtitle = "守卫的每条决策都在这里, 可筛选/复制/清空",
+                imageVector = PerfIcon.Title,
+                onClickLabel = "打开运行日志页面",
+                onClick = {
+                    mainVm.navigatePage(LogFileRoute)
                 })
 
             if (ActivityService.isRunning.collectAsState().value) {

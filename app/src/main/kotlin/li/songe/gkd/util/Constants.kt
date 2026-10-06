@@ -7,7 +7,9 @@ const val SERVER_SCRIPT_URL =
     "https://registry.npmmirror.com/@gkd-kit/config/latest/files/dist/server.js"
 
 // 本 fork 仓库地址(上游原值: https://github.com/gkd-kit/gkd)
-const val REPOSITORY_URL = "https://github.com/bingguang1/gkd-tejiao"
+// ⚠️ 仓库规范名是 GKD-tetiao(不是 tejiao): 写错虽然靠 301 重定向也能打开, 但每次跳转都多一次
+//    请求, 且 App 内"关于/问题反馈/更新说明"里的链接会一直显示成非规范拼写 —— v122 统一成规范名。
+const val REPOSITORY_URL = "https://github.com/bingguang1/GKD-tetiao"
 const val ISSUES_URL = "${REPOSITORY_URL}/issues"
 const val RELEASES_URL = "${REPOSITORY_URL}/releases/latest"
 

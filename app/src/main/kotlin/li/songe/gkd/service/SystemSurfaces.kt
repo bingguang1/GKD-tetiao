@@ -4,8 +4,13 @@ import li.songe.gkd.META
 import li.songe.gkd.a11y.launcherAppId
 import li.songe.gkd.app
 import li.songe.gkd.util.systemUiAppId
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.provider.MediaStore
+import android.provider.Settings
+import android.view.inputmethod.InputMethodManager
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -141,6 +146,82 @@ object SystemSurfaces {
 
     private val launchableCache = ConcurrentHashMap<String, Boolean>()
 
+    /**
+     * ★ v121: **输入法(键盘)包** —— 用户敲键盘**不是**"跳到了别的应用"。
+     *
+     * 取证: `gkd-20261002.log` 20:52:31 `JumpGuard jump pkg=com.aliyun.tongyi -> com.baidu.input_vivo
+     * gap=835ms window=1500ms … send BACK` —— 用户在千问里点开键盘, GKD 把输入法当成"跳转目标"
+     * **按了返回键**(表现: 键盘一闪没了)。
+     *
+     * 动态读(懒加载一次): 启用的输入法服务 + secure 里的当前输入法 —— 与包名表无关, 换输入法也跟得上。
+     * 语义按 [isTransientSurface] 处理: **忽略但保留源应用**(用户还在原应用里打字)。
+     */
+    private val imePackages: Set<String> by lazy {
+        runCatching {
+            val ids = linkedSetOf<String>()
+            (app.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+                ?.enabledInputMethodList
+                ?.forEach { imi -> runCatching { ids.add(imi.packageName) } }
+            Settings.Secure.getString(app.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+                ?.let { flat -> ComponentName.unflattenFromString(flat)?.packageName?.let { ids.add(it) } }
+            ids.filter { it.isNotEmpty() }.toSet()
+        }.getOrDefault(emptySet())
+    }
+
+    /**
+     * ★ v121: **相机 / 相册 / 文件选择器**包 —— 这些是"用户主动发起的跨应用意图"(拍照、选图、选文件),
+     * 不是广告跳转目标。
+     *
+     * 判据不写死包名(各 ROM 千差万别), 而是**查谁会响应这些标准 Intent**(ACTION_IMAGE_CAPTURE /
+     * ACTION_VIDEO_CAPTURE / ACTION_PICK / ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT / ACTION_CREATE_DOCUMENT);
+     * 懒加载一次后就是集合判断, 热路径零开销。
+     *
+     * 用法与输入法不同: **只**用在"要不要按返回键/要不要算误点"这种地方([JumpGuard] 的跳转目标、
+     * [FakeSkipGuard] 的落点), 不把它整体当系统浮层 —— 免得连"在相机里找跳过按钮"这种扫描也一起停掉。
+     */
+    private val userIntentPackages: Set<String> by lazy {
+        runCatching {
+            val pm = app.packageManager
+            val ids = linkedSetOf<String>()
+            val actions = listOf(
+                MediaStore.ACTION_IMAGE_CAPTURE,
+                MediaStore.ACTION_VIDEO_CAPTURE,
+                Intent.ACTION_PICK,
+                Intent.ACTION_GET_CONTENT,
+                Intent.ACTION_OPEN_DOCUMENT,
+                Intent.ACTION_CREATE_DOCUMENT,
+            )
+            val types = listOf(null, "image/*", "*/*")
+            actions.forEach { action ->
+                types.forEach { type ->
+                    runCatching {
+                        val intent = Intent(action).apply {
+                            addCategory(Intent.CATEGORY_DEFAULT)
+                            if (type != null) setTypeAndNormalize(type)
+                        }
+                        pm.queryIntentActivities(intent, PackageManager.MATCH_ALL).forEach { ri ->
+                            ri.activityInfo?.packageName?.takeIf { it.isNotEmpty() }?.let { ids.add(it) }
+                        }
+                    }
+                }
+            }
+            // 兜底: AOSP/多数 ROM 的文件选择器包名(查询拿不到时至少挡住它)
+            ids.add("com.android.documentsui")
+            ids.filter { it.isNotEmpty() }.toSet()
+        }.getOrDefault(emptySet())
+    }
+
+    /**
+     * ★ v121: 这个包是"用户主动发起的意图目标"吗(输入法 / 相机 / 相册 / 文件选择器)。
+     *
+     * 用在**判错就会误按返回键**的地方: [JumpGuard] 的跳转目标判定、[FakeSkipGuard] 的落点判定 ——
+     * 用户从 A 打开相机拍照、或点开键盘, 都不该被当成"被广告带走了"。
+     */
+    fun isUserIntentTarget(pkg: String?): Boolean {
+        if (pkg.isNullOrEmpty()) return false
+        return pkg in imePackages || pkg in userIntentPackages
+    }
+
     /** 桌面(动态读 [launcherAppId], 见 [userLeftIds] 的说明) */
     private fun isLauncher(pkg: String): Boolean = launcherAppId.isNotEmpty() && pkg == launcherAppId
 
@@ -152,6 +233,8 @@ object SystemSurfaces {
         if (pkg.isNullOrEmpty()) return true // 包名未知: 宁可不动作
         if (isLauncher(pkg) || pkg in userLeftIds) return false
         if (pkg in transientIds) return true
+        // ★ v121: 输入法(键盘)窗口 —— 用户在自己应用里打字, 不是"去了别的地方", 也不是跳转目标
+        if (pkg in imePackages) return true
         // fok0025: 只有"完全没有 Activity 的包"才算系统浮层(见 hasAnyActivity 的说明)
         return !hasAnyActivity(pkg)
     }
