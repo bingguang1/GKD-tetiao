@@ -268,7 +268,7 @@ fun UninstallCleanupPage() {
 
             item(key = "tail") {
                 Text(
-                    text = "说明: 桌面小组件与系统安装历史是**清不掉**的(系统没有对应接口), 它们无害, 页面里已写明; " +
+                    text = "说明: 桌面小组件与系统安装历史是清不掉的(系统没有对应接口), 它们无害, 页面里已写明; " +
                         "电池白名单/权限授权/appops/应用数据目录会随卸载自动消失。",
                     modifier = Modifier.padding(16.dp),
                     style = MaterialTheme.typography.bodySmall,

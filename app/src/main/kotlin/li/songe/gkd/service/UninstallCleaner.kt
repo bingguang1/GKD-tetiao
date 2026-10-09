@@ -390,7 +390,7 @@ object UninstallCleaner {
                 id = "info_history",
                 title = "系统安装历史(清不掉, 无害)",
                 detail = "`dumpsys package` 里的安装序号表与安装会话历史会留一条包名 —— " +
-                    "这是系统内部表, **没有公开 API 可删**, 删了反而破坏表完整性; 它不产生任何行为影响",
+                    "这是系统内部表, 没有公开 API 可删, 删了反而破坏表完整性; 它不产生任何行为影响",
                 cleanable = false,
             )
         )
@@ -473,12 +473,25 @@ object UninstallCleaner {
      */
     private fun writeKey(ns: String, key: String, value: String?): String? {
         val cr = app.contentResolver
-        // ★ 删键优先用 Shizuku 的 `settings delete`: 直接 `putString(key, null)` 在部分 ROM 上只是把**值**写成
-        //   null, 行还留在表里(`settings list` 仍能看见 `key=null`); 用 `settings delete` 才是真删 —— 这也与
-        //   真机残留清单的复核口径一致(`settings list <ns> | grep <包名>` 应为 0 条)。
-        if (value == null && shizukuReady()) {
-            val err = execPrivileged("settings delete $ns '$key'")
-            if (err == null && readKey(ns, key).first == null) return null
+        // ★★ 删键的顺序是"真删优先"(2026-10-09 在联想平板 Android16/ZUXOS 上实测):
+        //   ① `putString(key, null)` **只把值写成 null, 行还留在表里** —— `settings list global | grep 包名`
+        //      仍能看到 `li.songe.gkd|camera=null`, 而残留清单的验收口径是"这一类应为 0 条"。
+        //   ② `ContentResolver.delete(CONTENT_URI, "name=?", …)` 才是**删行**(真机实测: 删完 `settings list`
+        //      里该行消失, `settings get` 为 null)。这就是 `adb shell content delete --uri …` 的同一条路。
+        //   ③ 有 Shizuku 时还可以退回 `settings delete`(同样真删)。
+        if (value == null) {
+            val deleteOk = runCatching {
+                when (ns) {
+                    "global" -> cr.delete(Settings.Global.CONTENT_URI, "name=?", arrayOf(key))
+                    "secure" -> cr.delete(Settings.Secure.CONTENT_URI, "name=?", arrayOf(key))
+                    else -> cr.delete(Settings.System.CONTENT_URI, "name=?", arrayOf(key))
+                }
+            }.getOrDefault(0)
+            if (deleteOk > 0 && readKey(ns, key).first == null) return null
+            if (shizukuReady()) {
+                val err = execPrivileged("settings delete $ns '$key'")
+                if (err == null && readKey(ns, key).first == null) return null
+            }
         }
         val direct = runCatching {
             when (ns) {
