@@ -63,6 +63,11 @@
    + `adb shell settings put secure accessibility_enabled 1`。
 3. 需要"清磁贴/还原引擎"这类操作时，可在「卸载清理」页复制 adb 命令，或连接 Shizuku。
 
+> **本轮顺带修的配套脚本 bug**：`adb-oneclick-setup.ps1` 里找 APK 的通配原来写死
+> `GKD特调版-1.12.1-fok*.apk`，而 fok0015 起文件名已是 `GKD特调版-1.12.2-fok00XX.apk`
+> ⇒ **"未安装 / -Upgrade"时永远找不到 APK**（只会报"找不到 APK"）。现已改成 `GKD特调版-*.apk` + 取最新，
+> 并在 vivo 手机上把「一键 ADB 配置」整条流程跑通（7 项自检全绿）。
+
 ## 已知限制（如实）
 
 - 磁贴清理在 Android 14+ 必须走 Shizuku / 电脑 adb（系统禁止应用读取该键）；

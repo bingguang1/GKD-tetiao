@@ -538,7 +538,19 @@ adb shell cmd appops get li.songe.gkd android:get_device_orientation  # 本机: 
   `gkd-tejiao-v1.12.2-fok0029.apk`（fork 签名，回读 sha256 与本机一致）、`oneclick-adb-setup-autostart.bat` + `adb-oneclick-setup.ps1`、
   `oneclick-close-quickapp.bat` + `quickapp-off.ps1`、CI 自带的 `gkd-tejiao-adb-tools.zip`。
   现成脚本：`gkd-build\tools-gh\gh_publish_fok0029.py`（删同名资产→传 5 个→写正文→验收）、`gh_fix_asset_names_fok0029.py`。
-- ★★ **本次新踩的坑（下次一定会再遇到）**：
+- ★ **v123 已发布**：<https://github.com/bingguang1/GKD-tetiao/releases/tag/v1.12.2-fok0030>（commit `22a1abe`，tag `v1.12.2-fok0030`，CI run `37933982521` success），资产 6 个：
+  `gkd-tejiao-v1.12.2-fok0030.apk`（fork 签名，**回读 sha256 与本机逐字节一致** `F1B2E896…`）、`oneclick-adb-setup-autostart.bat` + `adb-oneclick-setup.ps1`、
+  `oneclick-close-quickapp.bat` + `quickapp-off.ps1`、CI 自带的 `gkd-tejiao-adb-tools.zip`。
+  现成脚本：`gkd-build\tools-gh\gh_publish_fok0030.py`（等 CI → 建/取 release → 删同名资产 → 传 5 个 → 写正文 → 回读 sha256）。
+  ★★ **v123 的两条新经验**：
+  1. **认证不用手工造 token**：本机 `credential.helper=manager`（Windows 凭据管理器）里已存 GitHub 凭据
+     （`git:https://github.com` → `bingguang1`，以及 `x-access-token`），**`git push` 直接就能用**；
+     要给 API 脚本用 token 时，`git credential fill`（输入 `protocol=https` + `host=github.com` + 空行）即可取出，
+     取出后别打印、用完删文件。⚠️ **别用 `GIT_CONFIG_COUNT/KEY/VALUE` 注入 `http.extraHeader`** ——
+     空的 `GIT_CONFIG_VALUE_1` 会让 git 直接 `fatal: missing config value`（本轮实测踩到）。
+  2. **`github.com:443` 本轮是通的**（`git ls-remote`/`push` 都直接成功），上一轮的 conproxy 这次没用到 ——
+     它更像"线路/时段问题"，**先直接试，失败再起 conproxy**（见下面第 1 条）。
+- ★★ **v122 那轮踩的坑（仍然有效）**：
   1. **本机 `github.com:443` 不通（解析到 20.205.243.166 超时），但 `api.github.com` / `uploads.github.com` 通**（140.82.112.3 等老 IP 可达）
      ⇒ `git push` 报 `Failed to connect to github.com:443`。解法：起本地最小 CONNECT 代理把 host 映射到可用 IP
      （`E:\AI_workspace\.dsh-tmp\conproxy.py`），再 `git -c http.proxy=http://127.0.0.1:8899 -c http.sslBackend=openssl push <url> main`
