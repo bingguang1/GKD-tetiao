@@ -5,8 +5,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import li.songe.gkd.store.storeFlow
 import li.songe.gkd.ui.share.BaseViewModel
 import li.songe.gkd.util.LogUtils
+import li.songe.gkd.util.format
 import li.songe.gkd.util.logFolder
 import java.io.File
 import java.io.RandomAccessFile
@@ -39,6 +41,8 @@ class LogFileVm : BaseViewModel() {
         /** 单次最多读取的尾部字节数(超出就只显示最后这一段) */
         private const val MAX_READ_BYTES = 2 * 1024 * 1024
 
+        private const val DAY_MS = 24 * 60 * 60 * 1000L
+
         /** 命中这些词的日志按"异常"标红 */
         private val errorWords =
             listOf("Exception", "FATAL", "failed", "崩溃", "失败", "error", "Error")
@@ -53,6 +57,30 @@ class LogFileVm : BaseViewModel() {
         fun isErrorEntry(entry: String): Boolean = errorWords.any { entry.contains(it) }
 
         fun isGuardEntry(entry: String): Boolean = guardWords.any { entry.contains(it) }
+
+        /**
+         * fork(fok0030): 顶栏那排**守卫筛选标签** —— 排障时最常问的是"刚才那一枪是哪个守卫打的",
+         * 以前只能在搜索框里手打 `ShakeGuard`; 现在点一下就行。
+         *
+         * 每个标签的 `words` 是"命中任意一个就算"的关键字(日志行的 tag 段就在里面)。
+         * 加新守卫时**只改这一处**。
+         */
+        data class GuardChip(val label: String, val words: List<String>)
+
+        val guardChips: List<GuardChip> = listOf(
+            GuardChip("ShakeGuard", listOf("ShakeGuard")),
+            GuardChip("JumpGuard", listOf("JumpGuard")),
+            GuardChip("假跳过", listOf("FakeSkipGuard")),
+            GuardChip("坐标守卫", listOf("ClickGuard")),
+            GuardChip("快应用", listOf("QuickApp")),
+            GuardChip("关联守护", listOf("GuardAssoc")),
+            GuardChip("无障碍", listOf("A11yAutoGuard", "A11yService")),
+            GuardChip("异常", errorWords),
+        )
+
+        /** chip 与搜索框是**叠加**关系: 两个都满足才显示 */
+        fun matchesChip(entry: String, chip: GuardChip?): Boolean =
+            chip == null || chip.words.any { entry.contains(it) }
     }
 
     /** 一个日志文件(日期 + 大小 + 修改时间) */
@@ -81,6 +109,48 @@ class LogFileVm : BaseViewModel() {
 
     /** 顶栏是否处于"搜索/筛选"输入态 */
     val showSearchBarFlow = MutableStateFlow(false)
+
+    /** fork(fok0030): 当前选中的守卫标签(null = 全部) */
+    val chipFlow = MutableStateFlow<GuardChip?>(null)
+
+    /** fork(fok0030): 日志保留天数(设置项, 默认 7 天) */
+    fun retainDays(): Int = runCatching { storeFlow.value.logRetainDays }.getOrDefault(7).coerceIn(1, 30)
+
+    /**
+     * fork(fok0030): 按保留天数算出"将被清除"的文件(只算, 不删) —— 给页面弹确认框用。
+     *
+     * 口径: 文件名里的日期(`gkd-YYYYMMDD.log`)**早于**「今天 - (保留天数 - 1)」的才算过期;
+     * 也就是"保留最近 N 天(含今天)"。名字不合规范的用文件修改时间兜底。
+     */
+    fun expiredPlan(days: Int = retainDays(), now: Long = System.currentTimeMillis()): List<LogItem> {
+        val cutoff = (now - (days - 1).coerceAtLeast(0) * DAY_MS).format("yyyyMMdd")
+        return filesFlow.value.filter { it.dayKey() < cutoff }
+    }
+
+    /** 按保留天数删除过期日志文件(在 IO 线程删, 删完自动刷新列表) */
+    fun clearExpired(days: Int = retainDays(), onDone: (Int, Long) -> Unit) {
+        viewModelScope.launch {
+            val targets = expiredPlan(days)
+            val res = withContext(Dispatchers.IO) {
+                var count = 0
+                var bytes = 0L
+                targets.forEach { item ->
+                    val f = File(logFolder, item.name)
+                    bytes += item.size
+                    if (runCatching { f.delete() }.getOrDefault(false)) count++
+                }
+                count to bytes
+            }
+            LogUtils.d("LogFile clear-expired days=$days deleted=${res.first} bytes=${res.second}")
+            reload()
+            onDone(res.first, res.second)
+        }
+    }
+
+    private fun LogItem.dayKey(): String {
+        val n = name.removePrefix("gkd-").removeSuffix(".log")
+        return if (n.length == 8 && n.all { it.isDigit() }) n else mtime.format("yyyyMMdd")
+    }
 
     init {
         reload()

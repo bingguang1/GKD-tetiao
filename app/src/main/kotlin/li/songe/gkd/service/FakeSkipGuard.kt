@@ -8,8 +8,10 @@ import li.songe.gkd.a11y.A11yRuleEngine
 import li.songe.gkd.a11y.TopActivity
 import li.songe.gkd.a11y.topActivityFlow
 import li.songe.gkd.appScope
+import li.songe.gkd.data.ActionPerformer
 import li.songe.gkd.data.ActionResult
 import li.songe.gkd.data.ResolvedRule
+import li.songe.gkd.shizuku.casted
 import li.songe.gkd.store.storeFlow
 import li.songe.gkd.util.LogUtils
 import li.songe.gkd.util.launchTry
@@ -18,36 +20,47 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * 免 root「假跳过防护」(v100 新增)。
+ * 免 root「假跳过防护」。
  *
- * 背景: 开屏广告里的"跳过"有两种在节点属性上无法区分的形态——
- *   1. 真跳过: 文本节点自身 clickable=false, 但点击它的坐标有效(例: 学习通 com.chaoxing.mobile:id/btn_jump);
- *   2. 假跳过: "跳过"只是装饰性文字/图片(clickable=false), 下面盖着广告的可点层,
- *      点它的中心坐标 = 点广告 → 拉起浏览器/应用市场/落地页, 甚至退出当前小程序。
- * 因为两种形态都是 clickable=false, 只靠选择器(如加 [clickable=true])区分会误伤真跳过
- * (见 gkd-20260908.log: btn_jump 与微信小程序"跳过"均为 clickable=false, 但结果相反)。
+ * ## 背景: 开屏广告里的"跳过"有两种在节点属性上无法区分的形态
+ *   1. **真跳过**: 文本节点自身 `clickable=false`, 但点它的坐标有效(例: 学习通 `id=…/btn_jump`);
+ *   2. **假跳过**: "跳过"只是装饰文字, **下面盖着广告的可点层**, 点它的坐标 = 点广告 → 拉起落地页,
+ *      甚至退出当前小程序。
  *
- * 因此本模块的判据是"点击之后落到了哪里", 分两道闸:
- *   A. 点后校验(主): 对"跳过类点击"在 ~1.2s 后校验前台包。
- *      - 前台包未变 → 正常跳过, 只记日志;
- *      - 前台变成桌面/系统界面 → 疑似被广告踢出(可能是用户自己按 Home, 故需同进程内累计 2 次才降级);
- *      - 前台变成**别的应用**(浏览器/市场/落地页) → 判定假跳过误点 → 立刻返回键退回 + 把该 App 记入降级名单。
- *   B. 点前否决(降级名单生效后): 已被判定过假跳过的 App 里, 不再自动点击"不可点的跳过类文字",
- *      只允许点真正 clickable=true 的按钮 —— 宁可不跳, 也不误点进广告。名单可在设置页一键清空。
+ * ## fok0030 重做(用户实测驱动)
+ * 用户报: **"有些广告并不是假的跳过, 只是跳过的按钮区域不在右上角, 这时也会触发这个, 导致广告不跳过"**。
+ * 老版本(fok0029 及之前)只有"事后落点校验", 且一旦判错就把**整个 App 拉黑** —— 于是:
+ *   - 真跳过被当成假跳过 ⇒ 按返回键把人拉回;
+ *   - 拉黑之后**这个 App 的不可点跳过文字永远不再点** ⇒ "广告从此不跳了"。
  *
- * 与 §3.1 防摇一摇的关系: v96 曾因"找不到关闭按钮就无条件按返回键"导致微信等被误退, v97 已移除。
- * 本模块的返回键**不是兜底**, 而是"已经证实跳到了别的应用"这一确定性条件下的回退, 语义不同。
+ * 现在改成两道闸 + 一条铁律:
+ *   - **闸 A(事前, 新增) [SkipTreeJudge]**: 点之前用无障碍树判断"这个点上有没有明显更大的可点层盖着"。
+ *     判 `Fake` ⇒ 不点; 判 `Real`/`Unknown` ⇒ **照点**(铁律: **判不准就点, 误拦优先避免**)。
+ *     规则自己显式声明可点(`action: clickNode` 或选择器写 `clickable=true`) ⇒ **永远放行**, 判据不参与。
+ *   - **闸 B(事后)**: 点完 ~1.2s 校验落点。
+ *     ★ 关键放宽: 若事前判据判的是 `Real`(那个点上没有覆盖层 ⇒ 这一枪确实打在 App 自己的处理上),
+ *       那么"跳到了别的应用"是 **App 自己的正常业务跳转**, **只记日志, 既不按返回键也不降级**
+ *       —— 这正是用户报的那类误伤。
+ *   - **降级语义不再整 App**: 改成"**某个 App 的某个规则组 + 某种节点形态**"降级, 默认 **24 小时**自动恢复
+ *     (老字段 `fakeSkipVetoApps` 仍然读取并尊重, 设置页可一键清空, 不再新增整 App 记录)。
+ *
+ * ## 与 [JumpGuard] / [ShakeGuard] 的关系
+ * `JumpGuard` 管"GKD 没在等落点却被带走"; `ShakeGuard` 管"开屏时把可点关闭按钮点掉"; 本模块只管
+ * "**我们点了不可点的跳过文字之后, 落点对不对**"。
  */
-
 private const val LOG_TAG = "FakeSkipGuard"  // 日志/共用工具(GuardUtils)里区分调用方
 private const val VERIFY_DELAY = 1200L      // 点击后多久校验落点
 private const val BACK_WAIT = 600L          // 返回键之后的观察时间
 private const val RELAUNCH_WAIT = 900L      // 拉起原 App 之后的观察时间
 private const val COOLDOWN_MS = 4000L       // 两次处置之间的冷却
 private const val VETO_MEMO_MS = 3000L      // 同一节点被否决后的记忆窗口(挡同节点的其它规则)
-private const val LEFT_SYSTEM_LIMIT = 2     // "疑似被踢到桌面"累计多少次才降级该 App
+private const val LEFT_SYSTEM_LIMIT = 2     // "疑似被踢到桌面"累计多少次才降级
 private const val VETO_LOG_INTERVAL_MS = 3000L // 否决日志节流(规则匹配循环约 300ms 一轮)
+private const val JUDGE_LOG_INTERVAL_MS = 3000L // 判据日志节流(fok0030 实测: 不节流会每 300ms 刷一条)
 private const val MAX_TEXT_LEN = 20         // 命中节点文本最大长度(排除正文长文本)
+private const val JUDGE_MEMO_MS = 5000L     // 事前判据结果的记忆窗口(闸 B 要读它)
+private const val DEGRADE_MS = 24 * 60 * 60 * 1000L // 降级有效期: 24 小时后自动恢复
+private const val VETO_RULE_FIELD_SEP = '\t'
 
 object FakeSkipGuard {
 
@@ -69,8 +82,14 @@ object FakeSkipGuard {
     private var vetoNodeTime = 0L
 
     private val leftSystemCount = ConcurrentHashMap<String, Int>()
-    private val toastShownAppIds = ConcurrentHashMap.newKeySet<String>()
+    private val toastShownKeys = ConcurrentHashMap.newKeySet<String>()
     private val lastVetoLogTime = ConcurrentHashMap<String, Long>()
+    private val lastJudgeLogTime = ConcurrentHashMap<String, Long>()
+
+    /** 闸 A 的判定结果缓存 —— 闸 B 要读它来决定"这一枪是不是我们自己点的、打在哪" */
+    private val judgeMemo = ConcurrentHashMap<String, JudgeMemo>()
+
+    private data class JudgeMemo(val judgement: SkipJudgement, val at: Long)
 
     /**
      * fork(v108): 最近一次**跳过类点击**的时间 —— 给 [JumpGuard] 判断"此刻该不该让位"用。
@@ -93,7 +112,7 @@ object FakeSkipGuard {
 
     // ---------------- 对外: 设置页用 ----------------
 
-    /** 已被判定过假跳过、当前处于"降级"(不点不可点跳过文字)状态的应用 */
+    /** 老语义(fok0029 及之前)的"整 App 降级"名单 —— 只读+可清空, 不再新增(见类注释) */
     fun vetoAppIds(): MutableSet<String> {
         return storeFlow.value.fakeSkipVetoApps.split('\n')
             .map { it.trim() }
@@ -101,38 +120,132 @@ object FakeSkipGuard {
             .toMutableSet()
     }
 
+    /** 清空老名单(整 App 降级) */
     fun clearVetoApps() {
         storeFlow.value = storeFlow.value.copy(fakeSkipVetoApps = "")
-        LogUtils.d("$LOG_TAG clear-veto")
+        LogUtils.d("$LOG_TAG clear-veto-apps(legacy)")
     }
 
-    // ---------------- 闸 A: 点前否决 ----------------
+    /** 当前生效的"规则组降级"条目(已过期的自动剔除) */
+    fun vetoRules(now: Long = System.currentTimeMillis()): List<VetoRule> =
+        parseVetoRules(storeFlow.value.fakeSkipVetoRules).filter { it.expireAt > now }
+
+    fun vetoRuleCount(now: Long = System.currentTimeMillis()): Int = vetoRules(now).size
+
+    /** 设置页展示用: 一行一条, 形如 `com.xx.yy · 开屏广告 · 还剩 23h` */
+    fun vetoRuleLines(now: Long = System.currentTimeMillis()): List<String> = vetoRules(now).map { r ->
+        val left = ((r.expireAt - now) / 3600_000L).coerceAtLeast(1L)
+        "${r.pkg} · ${r.groupName.ifEmpty { r.groupKey.ifEmpty { "未知规则组" } }} · 还剩 ${left}h"
+    }
+
+    /** 清空"规则组降级"名单 */
+    fun clearVetoRules() {
+        storeFlow.value = storeFlow.value.copy(fakeSkipVetoRules = "")
+        LogUtils.d("$LOG_TAG clear-veto-rules")
+    }
+
+    /** 顺手清理过期条目(在写入新条目时调用, 避免无限增长) */
+    private fun pruneVetoRules(now: Long) {
+        val all = parseVetoRules(storeFlow.value.fakeSkipVetoRules)
+        val alive = all.filter { it.expireAt > now }
+        if (alive.size != all.size) {
+            storeFlow.value = storeFlow.value.copy(fakeSkipVetoRules = formatVetoRules(alive))
+        }
+    }
+
+    // ---------------- 闸 A: 点前(降级名单 + 事前树判据) ----------------
 
     /**
-     * 在规则真正执行动作前调用。返回 false 表示本次点击被否决(仅限"已降级 App + 不可点的跳过文字")。
+     * 在规则真正执行动作前调用。返回 false 表示本次点击被否决。
+     *
+     * 否决只发生在三种情况下(**其余一律放行**):
+     *   1. 规则**显式**声明可点(`action: clickNode` / 选择器含 `clickable=true`) —— 不否决, 直接放行;
+     *   2. 该 App + 该规则组 + 该节点形态 已在降级名单里(24h 内) —— 否决;
+     *   3. 老版整 App 降级名单命中(兼容, 设置页可清空) —— 否决;
+     *   4. 事前树判据判 `Fake`(那个点上盖着明显更大的可点层) —— 否决;
+     *      判 `Real` / `Unknown` —— **放行**(判不准就点)。
      */
     fun allowAction(rule: ResolvedRule, node: AccessibilityNodeInfo): Boolean {
-        if (!storeFlow.value.fakeSkipGuard) return true
+        val store = storeFlow.value
+        if (!store.fakeSkipGuard) return true
         val appId = topActivityFlow.value.appId
         if (appId.isEmpty() || appId == META.appId) return true
         if (node.isClickable) return true
-        if (!vetoAppIds().contains(appId)) return true
         if (!isSkipLikeTarget(rule, node)) return true
-        val key = nodeKey(node)
+        // ① 规则自己说要"点这个节点" ⇒ 由规则决定, 判据不参与
+        if (ruleDeclaresClickable(rule)) return true
+
         val now = System.currentTimeMillis()
-        // 同一节点上的其它规则(如全局开屏组的多个 rule)也一并否决
-        vetoNodeKey = key
-        vetoNodeTime = now
-        // 规则匹配是 ~300ms 一轮的循环, 否决日志做节流(否则同一节点会刷屏)
-        val lastLog = lastVetoLogTime[appId] ?: 0L
-        if (now - lastLog >= VETO_LOG_INTERVAL_MS) {
-            lastVetoLogTime[appId] = now
-            LogUtils.d(
-                "$LOG_TAG veto pkg=$appId text=${label(node)} bounds=${nodeBounds(node)}"
-            )
+        val shape = shapeKey(node)
+        val groupKey = groupKeyOf(rule)
+        val groupName = groupNameOf(rule)
+        val key0 = nodeKey(node)
+
+        // ② 规则组降级名单
+        if (store.fakeSkipVetoRules.isNotEmpty()) {
+            val hit = vetoRules(now).any {
+                it.pkg == appId && it.shape == shape && (it.groupKey.isEmpty() || it.groupKey == groupKey)
+            }
+            if (hit) {
+                rememberVetoNode(node, now)
+                logVetoThrottled(appId, "rule-group", node)
+                return false
+            }
         }
-        showVetoToast(appId)
-        return false
+
+        // ③ 老版整 App 降级名单(兼容)
+        if (store.fakeSkipVetoApps.isNotEmpty() && vetoAppIds().contains(appId)) {
+            rememberVetoNode(node, now)
+            logVetoThrottled(appId, "legacy-app", node)
+            return false
+        }
+
+        // ④ 事前树判据
+        if (!store.fakeSkipJudgeEnabled) return true
+        // ★ fok0030 实测: 被否决的节点在"规则匹配循环"(~300ms 一轮)里会被反复判到 —— 判完就记住它,
+        //   几秒内不再重复判(既不刷日志, 也不用反复走无障碍树)。
+        if (key0 == vetoNodeKey && now - vetoNodeTime < VETO_MEMO_MS) return false
+        val (x, y) = clickPoint(rule, node)
+        val judgement = SkipTreeJudge.judge(node, x, y)
+        rememberJudge(node, judgement, now)
+        if (judgement.verdict == SkipVerdict.Fake) {
+            rememberVetoNode(node, now)
+            logJudgeThrottled(
+                appId = appId,
+                verdict = judgement.verdict,
+                text = label(node),
+                evidence = judgement.evidence,
+                extra = "overlay=${judgement.overlay} pos=($x,$y) group=$groupName action=${rule.rule.action ?: "auto"}",
+            )
+            showJudgeToast(appId)
+            return false
+        }
+        logJudgeThrottled(
+            appId = appId,
+            verdict = judgement.verdict,
+            text = label(node),
+            evidence = judgement.evidence,
+            extra = "pos=($x,$y)",
+        )
+        return true
+    }
+
+    /** 判据日志节流: 被否决的节点每 300ms 会被再判一次, 不节流会刷屏(3 秒一条) */
+    private fun logJudgeThrottled(
+        appId: String,
+        verdict: SkipVerdict,
+        text: String,
+        evidence: String,
+        extra: String,
+    ) {
+        val key = "$appId|${verdict.text}|$evidence"
+        val now = System.currentTimeMillis()
+        if (now - (lastJudgeLogTime[key] ?: 0L) < JUDGE_LOG_INTERVAL_MS) return
+        lastJudgeLogTime[key] = now
+        LogUtils.d(
+            "$LOG_TAG skip-judge ${if (verdict == SkipVerdict.Fake) "reject" else "pass"} " +
+                "pkg=$appId text=$text verdict=${verdict.text} evidence=$evidence $extra"
+        )
     }
 
     // ---------------- 闸 B: 点后校验 ----------------
@@ -151,23 +264,35 @@ object FakeSkipGuard {
         if (!actionResult.action.startsWith("click")) return
         val pkgBefore = topActivity.appId
         if (pkgBefore.isEmpty() || pkgBefore == META.appId) return
+        if (ruleDeclaresClickable(rule)) return
         if (!isSkipLikeTarget(rule, node)) return
         val key = nodeKey(node)
         val now = System.currentTimeMillis()
-        // 刚被否决过的同一节点不再进入校验(理论上不会走到这里, 兜底)
         if (key == vetoNodeKey && now - vetoNodeTime < VETO_MEMO_MS) return
         val token = verifyToken.incrementAndGet()
-        // fork(v108): 登记"跳过类点击已发生", 供 JumpGuard 判断此刻是否该让位(见 lastSkipClickAt 的说明)
+        val judgement = judgeMemo[key]?.takeIf { now - it.at <= JUDGE_MEMO_MS }?.judgement
+        // fork(v108): 登记"跳过类点击已发生", 供 JumpGuard 判断此刻是否该让位
         lastSkipClickAt = now
         val activityBefore = topActivity.activityId
+        val shape = shapeKey(node)
+        val groupKey = groupKeyOf(rule)
+        val groupName = groupNameOf(rule)
         appScope.launchTry(Dispatchers.Default) {
             delay(VERIFY_DELAY)
             if (token != verifyToken.get()) return@launchTry
-            verify(pkgBefore, activityBefore, label(node))
+            verify(pkgBefore, activityBefore, label(node), judgement, shape, groupKey, groupName)
         }
     }
 
-    private suspend fun verify(pkgBefore: String, activityBefore: String?, target: String) {
+    private suspend fun verify(
+        pkgBefore: String,
+        activityBefore: String?,
+        target: String,
+        judgement: SkipJudgement?,
+        shape: String,
+        groupKey: String,
+        groupName: String,
+    ) {
         val now = System.currentTimeMillis()
         if (now - lastHandleTime < COOLDOWN_MS) return
         val after = topActivityFlow.value
@@ -178,51 +303,53 @@ object FakeSkipGuard {
             )
             return
         }
-        // ★ v121: 落到"用户主动发起的意图目标"(相机/相册/文件选择器/输入法) → 不算假跳过误点,
-        //   不按返回键、也不把该 App 记入降级名单 —— 否则用户点了"跳过"之后顺手去拍照/选图,
-        //   会被判成 misclick 并被拽回原应用(与 ShakeGuard v121 的那类"闪回"同源)。
+        // ★ v121: 落到"用户主动发起的意图目标"(相机/相册/文件选择器/输入法) → 不算假跳过误点
         if (SystemSurfaces.isUserIntentTarget(pkgAfter)) {
             LogUtils.d("$LOG_TAG landed-user-intent pkg=$pkgBefore -> $pkgAfter target=$target (不动作)")
             return
         }
         if (pkgAfter.isEmpty() || SystemSurfaces.isSystemSurface(pkgAfter)) {
-            // 回到桌面/系统界面(含状态栏、通知、上滑面板、负一屏): 不抢返回键(可能只是用户自己按了 Home
-            // 或上滑打开了面板), 仅累计记录。
-            // ★ fok0022: 旧判据只认 `launcher/systemui` 两个包名 —— 用户"上滑"到 `com.vivo.upslide`
-            //   (上滑面板)时会被当成"跳到了别的应用 = 假跳过误点", 于是**按返回键 + 把该 App 记入降级名单**;
-            //   现在任何系统界面都走这条安全分支(判据集中在 [SystemSurfaces])。
+            // 回到桌面/系统界面: 不抢返回键(可能只是用户自己按了 Home 或上滑打开了面板), 仅累计记录。
             val n = (leftSystemCount[pkgBefore] ?: 0) + 1
             leftSystemCount[pkgBefore] = n
             LogUtils.d(
                 "$LOG_TAG left-system pkg=$pkgBefore -> ${pkgAfter.ifEmpty { "null" }} count=$n target=$target"
             )
             if (n >= LEFT_SYSTEM_LIMIT) {
-                markMisclick(pkgBefore, reason = "left-system", toastEnabled = true)
-                // 判定成立时才把用户带回原 App(单次可能只是用户自己按了 Home, 不抢)
+                degrade(pkgBefore, groupKey, groupName, shape, reason = "left-system", toastEnabled = true)
                 val ok = relaunchApp(pkgBefore, LOG_TAG)
                 LogUtils.d("$LOG_TAG left-system relaunch=$ok pkg=$pkgBefore")
             }
             return
         }
+        // ★★ fok0030 关键放宽: 事前判据判 Real = "那个点上没有可点覆盖层" ⇒ 这一枪确实打在 App 自己的
+        //   处理上, 之后跳到别的应用是 **App 自己的正常业务跳转**(用户实测的高频误伤形态)。
+        //   此时只记日志: **不按返回键、不降级**。
+        if (judgement?.verdict == SkipVerdict.Real) {
+            LogUtils.d(
+                "$LOG_TAG landed-cross-app-real pkg=$pkgBefore -> $pkgAfter target=$target " +
+                    "evidence=${judgement.evidence} (事前判据=real ⇒ 判为 App 自己的跳转, 不动作)"
+            )
+            return
+        }
         // 跳到别的应用 → 假跳过误点
         lastHandleTime = now
-        LogUtils.d("$LOG_TAG misclick pkg=$pkgBefore -> $pkgAfter target=$target, send BACK")
-        markMisclick(pkgBefore, reason = "to:$pkgAfter", toastEnabled = true)
+        LogUtils.d(
+            "$LOG_TAG misclick pkg=$pkgBefore -> $pkgAfter target=$target judge=${judgement?.verdict?.text ?: "none"} " +
+                "evidence=${judgement?.evidence ?: "-"} group=$groupName, send BACK"
+        )
+        degrade(pkgBefore, groupKey, groupName, shape, reason = "to:$pkgAfter", toastEnabled = true)
         val backed = A11yRuleEngine.performActionBack()
         delay(BACK_WAIT)
         // 真机(vivo/Android16)实测: BACK 返回 true 也可能什么都没发生, 且 topActivityFlow 是**缓存值**
         // (屏幕锁了/没有新事件时会停在旧值) —— 所以这里必须用**新读一次**的窗口包名来判断
-        // (实现见 GuardUtils.currentForegroundPkg, 与 JumpGuard 共用同一份)
         val freshPkg = currentForegroundPkg()
         if (freshPkg == pkgBefore) {
             LogUtils.d("$LOG_TAG back ok sent=$backed now=$freshPkg")
             return
         }
-        // BACK 没把用户带回来 → 用原 App 的启动意图拉回(有 SYSTEM_ALERT_WINDOW/无障碍服务, 不受后台启动限制)
         val relaunched = relaunchApp(pkgBefore, LOG_TAG)
         delay(RELAUNCH_WAIT)
-        // now= 是"按返回后、拉起前"的那次读取, after= 是**拉起之后再读一次** —— 两者有意不是同一时刻,
-        // 排障时看到的 now≠after 正是"拉起生效了", 不是日志自相矛盾
         LogUtils.d(
             "$LOG_TAG back missed sent=$backed now=${freshPkg ?: "null"} relaunch=$relaunched after=${currentForegroundPkg() ?: "null"}"
         )
@@ -230,21 +357,110 @@ object FakeSkipGuard {
 
     // ---------------- 内部 ----------------
 
-    private fun markMisclick(appId: String, reason: String, toastEnabled: Boolean) {
+    /**
+     * 记录一次降级 —— **只降级"这个 App 的这个规则组 + 这种节点形态"**, 24 小时后自动恢复。
+     * (fok0029 及之前是 `fakeSkipVetoApps` 整 App 永久拉黑, 用户实测反馈那会让"这个 App 的广告从此不跳"。)
+     */
+    private fun degrade(
+        appId: String,
+        groupKey: String,
+        groupName: String,
+        shape: String,
+        reason: String,
+        toastEnabled: Boolean,
+    ) {
         if (appId.isEmpty()) return
-        val list = vetoAppIds()
-        if (!list.add(appId)) return
-        storeFlow.value = storeFlow.value.copy(fakeSkipVetoApps = list.joinToString("\n"))
-        LogUtils.d("$LOG_TAG veto-add pkg=$appId reason=$reason total=${list.size}")
-        if (toastEnabled) showVetoToast(appId)
+        val now = System.currentTimeMillis()
+        val list = parseVetoRules(storeFlow.value.fakeSkipVetoRules).filter { it.expireAt > now }.toMutableList()
+        val idx = list.indexOfFirst { it.pkg == appId && it.groupKey == groupKey && it.shape == shape }
+        if (idx >= 0) {
+            val old = list[idx]
+            list[idx] = old.copy(expireAt = now + DEGRADE_MS, reason = reason, count = old.count + 1)
+            LogUtils.d("$LOG_TAG degrade extend pkg=$appId group=$groupName count=${old.count + 1} reason=$reason")
+        } else {
+            list.add(
+                VetoRule(
+                    pkg = appId,
+                    groupKey = groupKey,
+                    groupName = groupName,
+                    shape = shape,
+                    expireAt = now + DEGRADE_MS,
+                    reason = reason,
+                    count = 1,
+                )
+            )
+            LogUtils.d(
+                "$LOG_TAG degrade add pkg=$appId group=$groupName shapeGroup=${shape.take(60)} " +
+                    "reason=$reason total=${list.size} ttl=24h"
+            )
+        }
+        storeFlow.value = storeFlow.value.copy(fakeSkipVetoRules = formatVetoRules(list))
+        if (toastEnabled) showDegradeToast(appId, groupName)
     }
 
-    private fun showVetoToast(appId: String) {
-        if (!toastShownAppIds.add(appId)) return
+    private fun showDegradeToast(appId: String, groupName: String) {
+        val key = "$appId|$groupName"
+        if (!toastShownKeys.add(key)) return
         toast(
-            "假跳过防护: 已停止在「${appLabel(appId)}」自动点击不可点的跳过文字\n(可在 设置 页恢复)",
+            "假跳过防护: 已暂停在「${appLabel(appId)}」${if (groupName.isEmpty()) "" else "的「$groupName」"}里" +
+                "自动点击不可点的跳过文字\n24 小时后自动恢复, 也可在 设置 页立即恢复",
             forced = true,
         )
+    }
+
+    private fun showJudgeToast(appId: String) {
+        val key = "judge|$appId"
+        if (!toastShownKeys.add(key)) return
+        toast(
+            "假跳过防护: 「${appLabel(appId)}」这个跳过是压在广告层上的假按钮, 已跳过不点(见运行日志)",
+            forced = true,
+        )
+    }
+
+    /** 该规则**显式**要求点节点(或选择器写明 clickable=true) ⇒ 由规则决定, 本模块放行 */
+    private fun ruleDeclaresClickable(rule: ResolvedRule): Boolean {
+        if (rule.rule.action == ActionPerformer.ClickNode.action) return true
+        return rule.rule.matches?.any { it.contains("clickable=true") } == true
+    }
+
+    /** 与 [li.songe.gkd.data.ActionPerformer.ClickCenter] 同口径的点击点(有 position 表达式就用它算) */
+    private fun clickPoint(rule: ResolvedRule, node: AccessibilityNodeInfo): Pair<Float, Float> {
+        val rect = runCatching { node.casted.boundsInScreen }.getOrNull()
+        val p = rect?.let { rule.rule.position?.calc(it) }
+        if (p != null) return p
+        val l = rect?.left ?: 0
+        val t = rect?.top ?: 0
+        val r = rect?.right ?: 0
+        val b = rect?.bottom ?: 0
+        return ((l + r) / 2f) to ((t + b) / 2f)
+    }
+
+    private fun groupKeyOf(rule: ResolvedRule): String =
+        runCatching { rule.g.group.key.toString() }.getOrDefault("")
+
+    private fun groupNameOf(rule: ResolvedRule): String = runCatching { rule.g.group.name }.getOrDefault("")
+
+    private fun rememberJudge(node: AccessibilityNodeInfo, judgement: SkipJudgement, now: Long) {
+        if (judgeMemo.size > 64) {
+            judgeMemo.entries.removeIf { now - it.value.at > JUDGE_MEMO_MS }
+        }
+        judgeMemo[nodeKey(node)] = JudgeMemo(judgement, now)
+    }
+
+    private fun rememberVetoNode(node: AccessibilityNodeInfo, now: Long) {
+        vetoNodeKey = nodeKey(node)
+        vetoNodeTime = now
+    }
+
+    private fun logVetoThrottled(appId: String, why: String, node: AccessibilityNodeInfo) {
+        val now = System.currentTimeMillis()
+        val lastLog = lastVetoLogTime[appId] ?: 0L
+        if (now - lastLog >= VETO_LOG_INTERVAL_MS) {
+            lastVetoLogTime[appId] = now
+            LogUtils.d(
+                "$LOG_TAG veto pkg=$appId why=$why text=${label(node)} bounds=${nodeBounds(node)}"
+            )
+        }
     }
 
     /** 这次点击是否属于"跳过广告"语义(节点文本像跳过, 或所在规则组名像开屏/广告) */
@@ -253,7 +469,7 @@ object FakeSkipGuard {
         if (text.isNotEmpty() && text.length <= MAX_TEXT_LEN && skipWords.any { text.contains(it) }) {
             return true
         }
-        val groupName = runCatching { rule.g.group.name }.getOrNull() ?: ""
+        val groupName = groupNameOf(rule)
         return groupName.isNotEmpty() && adGroupWords.any { groupName.contains(it) }
     }
 
@@ -272,4 +488,50 @@ object FakeSkipGuard {
     }
 
     private fun nodeKey(node: AccessibilityNodeInfo): String = "${nodeBounds(node)}@${label(node)}"
+
+    /** 节点形态指纹: 类名 + 尺寸 + 文本 —— 用来把"降级"限定在同一种形状的节点上 */
+    private fun shapeKey(node: AccessibilityNodeInfo): String {
+        val r = runCatching { node.casted.boundsInScreen }.getOrNull()
+        val size = if (r == null) "?" else "${r.width()}x${r.height()}"
+        return "${node.className ?: "?"}|$size|${label(node)}"
+    }
+
+    // ---------------- 降级名单的序列化(单行一条, 制表符分隔, 便于手机上看) ----------------
+
+    data class VetoRule(
+        val pkg: String,
+        val groupKey: String,
+        val groupName: String,
+        val shape: String,
+        val expireAt: Long,
+        val reason: String,
+        val count: Int,
+    )
+
+    private fun parseVetoRules(text: String): List<VetoRule> {
+        if (text.isBlank()) return emptyList()
+        return text.split('\n').mapNotNull { line ->
+            val t = line.trim()
+            if (t.isEmpty()) return@mapNotNull null
+            val parts = t.split(VETO_RULE_FIELD_SEP)
+            if (parts.size < 5) return@mapNotNull null
+            runCatching {
+                VetoRule(
+                    pkg = parts[0],
+                    groupKey = parts[1],
+                    groupName = parts[2],
+                    shape = parts[3],
+                    expireAt = parts[4].toLong(),
+                    reason = parts.getOrElse(5) { "" },
+                    count = parts.getOrElse(6) { "1" }.toIntOrNull() ?: 1,
+                )
+            }.getOrNull()
+        }
+    }
+
+    private fun formatVetoRules(list: List<VetoRule>): String = list.joinToString("\n") { r ->
+        listOf(
+            r.pkg, r.groupKey, r.groupName, r.shape, r.expireAt.toString(), r.reason, r.count.toString()
+        ).joinToString(VETO_RULE_FIELD_SEP.toString())
+    }
 }

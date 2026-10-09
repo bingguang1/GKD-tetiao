@@ -4,8 +4,8 @@
 > 本地构建请使用自己的密钥库与口令，不要照抄占位符。
 
 > **目标**：让新对话的 AI 在不丢上下文的前提下，直接接手「GKD特调版 fork」在 MuMu 模拟器 / vivo 真机 / 联想平板上的构建、验证与交付。
-> **当前版本**：**v122 = 1.12.2-fok0029**（versionCode 122）；已装 MuMu（真机/平板待装）。
-> **最后更新**：2026-10-06。
+> **当前版本**：**v123 = 1.12.2-fok0030**（versionCode 123）；已装 MuMu（真机/平板待装）。
+> **最后更新**：2026-10-09。
 > **怎么读**：§0 总览 → §1 目录 → §2 构建 → §3 功能与判据 → §5 诊断速查 → §7 待办。§8 是 2026-09-18 ~ 10-02 各轮历史的压缩（结论 + 仍有效的坑），§9 是不分轮次的全局踩坑速查。
 > **完整版**：未精简的逐轮流水另存为 `PROJECT-HANDOVER.full.md`（本地留存、含敏感信息，**不随公开副本发布**）。
 
@@ -21,13 +21,15 @@
 4. **通知栏一键开关无障碍**（`notif/` + `service/StatusService.kt`）—— 开启「控制 → 常驻通知」后常驻通知上出现「开启/关闭无障碍」按钮，与磁贴同一套语义
 5. **桌面小组件「GKD快捷开关」**（v97/v98，WGkdWidget 多路刷新）
 6. **关联应用守护**（`service/AssocAppGuard.kt`，v99 用户点名功能）—— §3.4
-7. **假跳过防护**（`service/FakeSkipGuard.kt`，v100 新增 / v101 真机加固 / v115 系统界面闸门）—— §3.7
+7. **假跳过防护**（`service/FakeSkipGuard.kt` + `service/SkipTreeJudge.kt`，v100 新增 / v101 真机加固 / v115 系统界面闸门 / **v123 整体重做**）—— §3.7
 8. **坐标点击守卫**（`GkdAction.kt#clickGuardRejectReason`，v102 新增）—— §3.9
 9. **摇一摇跳转防护**（`service/JumpGuard.kt`，v105 新增 / v106 按应用设定 / v108 修失效 / v109 语义兜底）—— §3.10
 10. **关闭快应用**（`service/QuickApp*.kt`，v107 新增，识别 → 秒退 → 根治三层）—— §3.11
 11. **系统界面闸门**（`service/SystemSurfaces.kt`，v115 新增，四个守卫共用）—— §3.12
-12. **应用内「运行日志」页 + 清空日志**（`ui/LogFilePage.kt` + `LogFileVm.kt`，v122 新增）—— §3.14
+12. **应用内「运行日志」页 + 清空日志**（`ui/LogFilePage.kt` + `LogFileVm.kt`，v122 新增）—— §3.13
     ⚠️ v122 还做了三件事：**清理 7 处死代码**、**修「关联应用守护」名单形同虚设**（§3.4）、App 内仓库链接改规范拼写。
+13. **卸载残留清理**（`service/UninstallCleaner.kt` + `ui/UninstallCleanupPage.kt`，v123 新增，用户点名）—— §3.15
+14. **假跳过重做 + 日志增强**（v123）—— §3.7 顶部 / §3.16
 
 ### 四条铁律（别再踩）
 
@@ -189,7 +191,20 @@ $env:GRADLE_USER_HOME='E:\AI_workspace\build-tools\gradle-home'   # ★ 必须�
   - **一键复修**：`E:\AI_workspace\锁竖屏修复.bat`（幂等）。代码上下文见 `adb-oneclick\Program.cs` 的 `HandleRotation` / `PrintRotation`。
 - （v99 阶段曾怀疑"守护反复摘除→重写无障碍服务导致前台重建"，已被上述定论推翻；§3.3 的非破坏性恢复 + 45s 冷却仍保留，属独立改进。）
 
-### 3.7 假跳过防护（`service/FakeSkipGuard.kt`）★ v100 新增，v101 真机修正，v115 加闸门
+### 3.7 假跳过防护（`service/FakeSkipGuard.kt`）★ v100 新增，v101 真机修正，v115 加闸门，**v123 整体重做**
+
+> ★★ **v123（fok0030）重做要点（判据已换代，下面的"整 App 拉黑"是旧设计）**：
+> 用户实测报**"有些广告并不是假的跳过，只是跳过的按钮区域不在右上角，这时也会触发这个，导致广告不跳过"**
+> （现象 = **根本没点**）。考古发现：老的"真跳过靶"其实**也是"跳过文字压在整屏可点层上"**的结构
+> ⇒ 真机那种"**没有覆盖层的真跳过**"从来没被正确建模过，而"覆盖层"正是唯一能抓住的差别。
+> 1. **事前树判据** `service/SkipTreeJudge.kt`（**只看结构、绝不看位置**）：取点击点 → 找"包含该点且 `clickable`
+>    且 `visibleToUser`"的节点（排除自己）→ **一个都没有** 或 只有一个"跟它差不多大"的 ⇒ `Real`（放行）；
+>    有面积 **≥8 倍** 或占屏 **≥50%** 的 ⇒ `Fake`（不点）；树读不全 ⇒ `Unknown`（**放行**）。
+>    **铁律：判不准就点**；规则显式声明可点（`action: clickNode` 或选择器含 `clickable=true`）⇒ **永远放行**。
+> 2. **闸 B 放宽**：事前判 `Real` 的点击之后跳到别的应用 ⇒ 记 `landed-cross-app-real`，**不按返回键、不降级**。
+> 3. **不再整 App 拉黑**：`fakeSkipVetoApps`（旧，只读+可清空）→ **`fakeSkipVetoRules`**（`pkg + 规则组 + 节点形态 + 24h 到期`）。
+> 4. 新增设置开关「**事前识别假跳过(推荐)**」（`fakeSkipJudgeEnabled`），关掉 = 退化为"只做事后落点校验"。
+> 5. 判据日志加 3s 节流 + 同节点 3s 记忆（实测不节流会每 300ms 刷一条）。
 
 - **要解决的问题**：开屏广告的"跳过"有两种形态，**在节点属性上完全一样**（都是 `clickable=false`）：
   1. **真跳过**：文本节点自身不可点，但**点它的坐标有效**（例：学习通 `id=com.chaoxing.mobile:id/btn_jump, text=跳过3s, clickable=false`）；
@@ -337,6 +352,38 @@ $env:GRADLE_USER_HOME='E:\AI_workspace\build-tools\gradle-home'   # ★ 必须�
   现在命中时**直接** `ensureEnabled()`（不受节流、不等下一轮）。
 - **App 内仓库链接改规范拼写**：`util/Constants.kt`（`REPOSITORY_URL`/`ISSUES_URL`/`RELEASES_URL`/`HOME_PAGE_URL`）
   与 `App.kt#commitUrl` 从 `gkd-tejiao` 改成规范名 `GKD-tetiao`（写错靠 301 也能开，但每次多一跳）。
+
+### 3.15 卸载残留清理（`service/UninstallCleaner.kt` + `ui/UninstallCleanupPage.kt`）★ v123 新增，用户点名
+
+- **要解决的问题**：卸载 `li.songe.gkd` 之后，系统里仍留着它写过的痕迹（真机实测见
+  `E:\AI_workspace\平板幽灵触控排查\GKD卸载残留清单.md`）：控制中心磁贴 `custom(li.songe.gkd/…)`（留一个点不动的
+  空格子）、`global` 里 `li.songe.gkd|<op>` 权限键（真机 7 条，值 -1）、以及 **fork 自己多写的** ——
+  **被 `pm disable-user` 停用 / `appops … REQUEST_INSTALL_PACKAGES deny` 禁装的快应用引擎**
+  （**卸载后用户在系统里也找不回来**，最严重）、无障碍启用列表条目、桌面小组件。
+- ★ **核心约束**：**应用被卸载后无法再执行任何代码** ⇒ 残留只能在**卸载之前**由 App 自己清。
+  所以入口是「设置 → 常规 → **卸载清理**」页（路由 `UninstallCleanupRoute`），而**不是**卸载后的清理脚本。
+- **能清什么**：磁贴、`global`/`secure`/`system` 里含包名的键、无障碍启用列表 + 总开关、快应用引擎（按台账还原）。
+  **清不掉的**如实写进页面：桌面小组件（系统没有"应用移除自己小组件"的接口）、`dumpsys package` 安装历史、
+  电池白名单/appops/数据目录（随卸载自动消失）。
+- ★★ **台账（可逆）**：`store/uninstall_ledger.json` —— 任何**系统级改动**动手前先记 `原值 → 新值`
+  （接入点：`QuickAppController.act()` 与清理动作本身），页面「**恢复改动**」按台账倒序还原。
+- ★★ **三个 MuMu 实测挖出来的真问题（都已修）**：
+  1. **Android 14+ 应用连 `sysui_qs_tiles` 都读不到**（`SecurityException: … only readable to apps with
+     targetSdkVersion <= 33`，有 `WRITE_SECURE_SETTINGS` 也没用）⇒ `readKey`/`writeKey` 三级：
+     直读/直写 → **Shizuku** → **如实回报错误**（页面直说"要 Shizuku 或电脑 adb"）。
+  2. **`A11yAutoGuard` 会把刚清掉的无障碍写回来** ⇒ 清理 a11y 前先置 `manualA11yOff=true` 让守护放手；
+     「恢复改动」时清掉该标记。
+  3. `Settings.Global.putString(key, null)` 在部分 ROM 上只是把**值**写成 null、行还留着；有 Shizuku 时**优先**
+     `settings delete` 真删。
+- **验收脚本**：`E:\AI_workspace\GKD特调版\tmp\cleanup-verify.ps1`。
+
+### 3.16 v123 的其他改动（假跳过重做 + 日志增强）
+
+- **假跳过保护重做**：见 **§3.7 顶部**。
+- **日志增强**：顶部新增**守卫筛选标签**（带条数、与搜索框叠加：`全部/ShakeGuard/JumpGuard/假跳过/坐标守卫/快应用/关联守护/无障碍/异常`，
+  加新守卫只改 `LogFileVm.guardChips` 一处）；新增设置项 **日志保留天数**（1/3/7/14/30，默认 7，`LogUtils` 自动清理按它执行）
+  与日志页「**清除过期(N)**」按钮。
+- **调试台**：`fakeskip-judge-rig.ps1` / `logverify.ps1` / `uitap.ps1`，均在 `E:\AI_workspace\GKD特调版\tmp\`。
 
 ---
 

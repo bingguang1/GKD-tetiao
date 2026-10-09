@@ -77,6 +77,31 @@ sealed class JumpGuardWindowOption(
     }
 }
 
+/**
+ * fork(fok0030): 「运行日志」保留天数 —— 以前写死 7 天([li.songe.gkd.util.LogUtils] 里的常量)。
+ *
+ * 现在这个值同时管两处:
+ *   1. 写入时的**自动滚动清理**(超过这个天数的文件在开新文件时被删);
+ *   2. 「运行日志」页上的「**清除过期**」按钮(只删超出保留天数的历史文件, 当天/近几天的留着)。
+ * 默认 7 天, 与老行为一致; 想省空间可以调到 1~3 天, 想留长期取证可以调到 30 天。
+ */
+sealed class LogRetainDaysOption(
+    override val value: Int,
+    override val label: String
+) : Option<Int> {
+    override val options get() = objects
+
+    data object D1 : LogRetainDaysOption(1, "1 天")
+    data object D3 : LogRetainDaysOption(3, "3 天")
+    data object D7 : LogRetainDaysOption(7, "7 天")
+    data object D14 : LogRetainDaysOption(14, "14 天")
+    data object D30 : LogRetainDaysOption(30, "30 天")
+
+    companion object {
+        val objects by lazy { listOf(D1, D3, D7, D14, D30) }
+    }
+}
+
 sealed class DarkThemeOption(
     override val value: Boolean?,
     override val label: String,

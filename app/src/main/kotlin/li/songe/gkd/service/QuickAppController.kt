@@ -2,6 +2,7 @@ package li.songe.gkd.service
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import li.songe.gkd.app
 import li.songe.gkd.shizuku.UserServiceWrapper
 import li.songe.gkd.shizuku.shizukuContextFlow
 import li.songe.gkd.store.storeFlow
@@ -57,7 +58,19 @@ object QuickAppController {
 
     private suspend fun act(verb: String, pkg: String, command: String): CmdOutcome =
         withContext(Dispatchers.IO) {
+            // fork(fok0030): 动手之前先记下"原本是什么状态" —— 卸载清理页(fok0030 新增)靠这条台账
+            // 把引擎精确还原回去。没有台账的话, 用户卸载 GKD 之后引擎会**永久停用**且无处恢复。
+            val before = beforeState(command, pkg)
             val r = runCommand(command)
+            if (r.ok && before != null) {
+                UninstallCleaner.record(
+                    kind = before.first,
+                    target = pkg,
+                    before = before.second,
+                    after = afterState(command),
+                    by = "quickapp",
+                )
+            }
             // 命令成功与否都刷一次: 停用/恢复会改变引擎的 enabledState 与 deeplink 响应能力
             QuickAppRegistry.refreshNow()
             withContext(Dispatchers.Main) {
@@ -69,6 +82,38 @@ object QuickAppController {
             }
             r
         }
+
+    /** 这条命令会改"引擎的哪种状态", 以及改之前是什么值(读不到就记 unknown, 恢复时如实跳过) */
+    private fun beforeState(command: String, pkg: String): Pair<String, String>? = when {
+        command.startsWith("pm disable-user") || command.startsWith("pm enable") ->
+            "engine_disabled" to runCatching {
+                if (app.packageManager.getApplicationInfo(pkg, 0).enabled) "enabled" else "disabled"
+            }.getOrDefault("unknown")
+
+        command.startsWith("cmd appops set") && command.contains("REQUEST_INSTALL_PACKAGES") ->
+            "engine_appop" to appopMode(pkg)
+
+        else -> null // am force-stop 是瞬时动作, 没有"原值"可记
+    }
+
+    private fun afterState(command: String): String = when {
+        command.startsWith("pm disable-user") -> "disabled"
+        command.startsWith("pm enable") -> "enabled"
+        command.contains(" deny") -> "deny"
+        command.contains(" default") -> "default"
+        else -> ""
+    }
+
+    /** 读引擎的 `REQUEST_INSTALL_PACKAGES` 当前模式(需 Shizuku; 读不到就 unknown) */
+    private fun appopMode(pkg: String): String {
+        val r = runCatching {
+            wrapper()?.execCommandForResult("cmd appops get $pkg REQUEST_INSTALL_PACKAGES")
+        }.getOrNull() ?: return "unknown"
+        if (!r.ok) return "unknown"
+        val line = r.result.lineSequence().firstOrNull { it.contains("REQUEST_INSTALL_PACKAGES") }
+            ?: return "unknown"
+        return line.substringAfter(':').trim().substringBefore(';').trim().ifEmpty { "unknown" }
+    }
 
     private fun runCommand(command: String): CmdOutcome {
         val w = wrapper() ?: return CmdOutcome(false, "未连接 Shizuku")

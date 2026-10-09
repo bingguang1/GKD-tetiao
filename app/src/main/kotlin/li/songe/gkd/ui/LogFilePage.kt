@@ -73,15 +73,19 @@ fun LogFilePage() {
     val selected by vm.selectedFlow.collectAsState()
     val entries by vm.entriesFlow.collectAsState()
     val filter by vm.filterFlow.collectAsState()
+    val chip by vm.chipFlow.collectAsState()
     val showSearchBar by vm.showSearchBarFlow.collectAsState()
     val loading by vm.loadingFlow.collectAsState()
     val truncated by vm.truncatedFlow.collectAsState()
 
-    val shown = remember(entries, filter) {
+    val shown = remember(entries, filter, chip) {
         val key = filter.trim()
-        if (key.isEmpty()) entries else entries.filter { it.contains(key, ignoreCase = true) }
+        entries.filter { LogFileVm.matchesChip(it, chip) }
+            .filter { key.isEmpty() || it.contains(key, ignoreCase = true) }
     }
     val current = files.firstOrNull { it.name == selected }
+    val retainDays = vm.retainDays()
+    val expired = remember(files, retainDays) { vm.expiredPlan(retainDays) }
 
     Scaffold(
         topBar = {
@@ -190,6 +194,33 @@ fun LogFilePage() {
                             }
                         }
                         Spacer(modifier = Modifier.height(6.dp))
+                        // fork(fok0030): 守卫筛选标签 —— 排障最常问"这一枪是哪个守卫打的",
+                        // 以前只能手打 ShakeGuard; 现在点一下; 数字是当前文件里的命中条数。
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            FilterChip(
+                                selected = chip == null,
+                                label = { Text(text = "全部 ${entries.size}") },
+                                onClick = throttle { vm.chipFlow.value = null },
+                            )
+                            LogFileVm.guardChips.forEach { item ->
+                                val hit = remember(entries, item) {
+                                    entries.count { LogFileVm.matchesChip(it, item) }
+                                }
+                                FilterChip(
+                                    selected = chip?.label == item.label,
+                                    label = { Text(text = "${item.label} $hit") },
+                                    onClick = throttle {
+                                        vm.chipFlow.value = if (chip?.label == item.label) null else item
+                                    },
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = buildString {
                                 append(current?.name ?: "-")
@@ -198,7 +229,7 @@ fun LogFilePage() {
                                     append(" · 最后写入 ").append(it.format("HH:mm:ss"))
                                 }
                                 append(" · 共 ").append(entries.size).append(" 条")
-                                if (filter.isNotBlank()) {
+                                if (filter.isNotBlank() || chip != null) {
                                     append(" · 筛选后 ").append(shown.size).append(" 条")
                                 }
                             },
@@ -226,6 +257,24 @@ fun LogFilePage() {
                                 mainVm.showShareLogDlgFlow.value = true
                             },
                         ) { Text(text = "导出") }
+                        // fork(fok0030): 只删"超出保留天数"的历史(天数在 设置→高级设置→日志 里改)
+                        TextButton(
+                            enabled = expired.isNotEmpty(),
+                            onClick = throttle(fn = vm.viewModelScope.launchAsFn {
+                                val bytes = expired.sumOf { it.size }
+                                mainVm.dialogFlow.waitResult(
+                                    title = "清除过期日志",
+                                    text = "将删除 ${expired.size} 个超过 ${retainDays} 天的日志文件" +
+                                        "(共 ${bytes.logSizeText()}):\n" +
+                                        expired.joinToString("\n") { it.name.logChipLabel() } +
+                                        "\n\n最近 ${retainDays} 天的日志会保留。",
+                                    error = true,
+                                )
+                                vm.clearExpired(retainDays) { count, size ->
+                                    toast("已清除 $count 个过期文件(${size.logSizeText()})")
+                                }
+                            }),
+                        ) { Text(text = if (expired.isEmpty()) "无过期日志" else "清除过期(${expired.size})") }
                     }
                 }
                 HorizontalDivider()

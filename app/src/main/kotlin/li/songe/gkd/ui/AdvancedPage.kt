@@ -74,6 +74,7 @@ import li.songe.gkd.ui.component.PerfIcon
 import li.songe.gkd.ui.component.PerfIconButton
 import li.songe.gkd.ui.component.PerfTopAppBar
 import li.songe.gkd.ui.component.SettingItem
+import li.songe.gkd.ui.component.TextMenu
 import li.songe.gkd.ui.component.TextSwitch
 import li.songe.gkd.ui.component.autoFocus
 import li.songe.gkd.ui.share.LocalMainViewModel
@@ -83,8 +84,10 @@ import li.songe.gkd.ui.style.iconTextSize
 import li.songe.gkd.ui.style.itemPadding
 import li.songe.gkd.ui.style.titleItemPadding
 import li.songe.gkd.util.AndroidTarget
+import li.songe.gkd.util.LogRetainDaysOption
 import li.songe.gkd.util.ShortUrlSet
 import li.songe.gkd.util.appInfoMapFlow
+import li.songe.gkd.util.findOption
 import li.songe.gkd.util.launchAsFn
 import li.songe.gkd.util.throttle
 import li.songe.gkd.util.toast
@@ -599,6 +602,21 @@ fun AdvancedPage() {
                 onClick = {
                     mainVm.navigatePage(LogFileRoute)
                 }
+            )
+            // fork(fok0030): 日志保留天数(以前写死 7 天) —— 同时管"写入时的自动滚动清理"与
+            // 「运行日志」页上的「清除过期」按钮, 详见 util/LogRetainDaysOption 的注释。
+            TextMenu(
+                title = "日志保留天数",
+                option = LogRetainDaysOption.objects.findOption(store.logRetainDays),
+                onOptionChange = {
+                    storeFlow.update { s -> s.copy(logRetainDays = it.value) }
+                },
+            )
+            SettingItem(
+                title = "",
+                subtitle = "超过这个天数的历史日志会被自动清理; 也可以在「运行日志」页里点「清除过期」立刻删掉。" +
+                    "当天与近几天的日志不受影响。",
+                imageVector = null,
             )
             SettingItem(
                 title = "界面日志",

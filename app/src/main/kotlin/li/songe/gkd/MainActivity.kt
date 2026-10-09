@@ -108,6 +108,8 @@ import li.songe.gkd.ui.JumpGuardAppListPage
 import li.songe.gkd.ui.JumpGuardAppListRoute
 import li.songe.gkd.ui.LogFilePage
 import li.songe.gkd.ui.LogFileRoute
+import li.songe.gkd.ui.UninstallCleanupPage
+import li.songe.gkd.ui.UninstallCleanupRoute
 import li.songe.gkd.ui.QuickAppEnginePage
 import li.songe.gkd.ui.QuickAppEnginePickPage
 import li.songe.gkd.ui.QuickAppEnginePickRoute
@@ -300,6 +302,7 @@ class MainActivity : ComponentActivity() {
                             entry<GuardAssocAppListRoute> { GuardAssocAppListPage() }
                             entry<JumpGuardAppListRoute> { JumpGuardAppListPage() }
                             entry<LogFileRoute> { LogFilePage() }
+                            entry<UninstallCleanupRoute> { UninstallCleanupPage() }
                             entry<DeviceOrientationAppListRoute> { DeviceOrientationAppListPage() }
                             entry<QuickAppEngineRoute> { QuickAppEnginePage() }
                             entry<QuickAppEnginePickRoute> { QuickAppEnginePickPage() }

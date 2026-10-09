@@ -10,7 +10,7 @@ data class GitInfo(
 }
 
 val gitInfo = GitInfo(
-    commitId = "fok0029",
+    commitId = "fok0030",
     commitTime = "1791285975070",
     tagName = null,
 )
@@ -56,7 +56,7 @@ android {
         targetSdk = rootProject.ext["android.targetSdk"] as Int
 
         applicationId = "li.songe.gkd"
-        versionCode = 122
+        versionCode = 123
         versionName = "1.12.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

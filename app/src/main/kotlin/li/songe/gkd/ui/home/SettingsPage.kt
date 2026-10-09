@@ -68,6 +68,7 @@ import li.songe.gkd.service.FakeSkipGuard
 import li.songe.gkd.service.QuickAppRegistry
 import li.songe.gkd.service.StatusService
 import li.songe.gkd.service.TrackService
+import li.songe.gkd.service.UninstallCleaner
 import li.songe.gkd.service.fixRestartAutomatorService
 import li.songe.gkd.shizuku.shizukuContextFlow
 import li.songe.gkd.store.deviceOrientationAppListFlow
@@ -79,6 +80,7 @@ import li.songe.gkd.ui.AdvancedPageRoute
 import li.songe.gkd.ui.BlockA11yAppListRoute
 import li.songe.gkd.ui.GuardAssocAppListRoute
 import li.songe.gkd.ui.DeviceOrientationAppListRoute
+import li.songe.gkd.ui.UninstallCleanupRoute
 import li.songe.gkd.ui.JumpGuardAppListRoute
 import li.songe.gkd.ui.QuickAppEngineRoute
 import li.songe.gkd.ui.component.CustomOutlinedTextField
@@ -519,7 +521,7 @@ fun useSettingsPage(): ScaffoldExt {
 
             TextSwitch(
                 title = "假跳过防护",
-                subtitle = "点击\"跳过\"后校验落点: 被带到广告落地页时立即返回, 并停止在该应用点不可点的跳过文字",
+                subtitle = "点击\"跳过\"后校验落点: 被带到广告落地页时立即返回, 并暂停对应的那条规则(24小时后自动恢复)",
                 checked = store.fakeSkipGuard,
                 onClickLabel = "切换假跳过防护开关",
                 onCheckedChange = {
@@ -527,18 +529,55 @@ fun useSettingsPage(): ScaffoldExt {
                         fakeSkipGuard = it
                     )
                 })
-            run {
-                val skipVetoList = store.fakeSkipVetoApps.split('\n')
-                    .map { it.trim() }
-                    .filter { it.isNotEmpty() }
-                AnimatedVisibility(visible = store.fakeSkipGuard && skipVetoList.isNotEmpty()) {
-                    SettingItem(
-                        title = "已降级应用 (${skipVetoList.size})",
-                        subtitle = "这些应用里不再自动点击不可点的跳过文字, 点击恢复",
-                        onClickLabel = "清空假跳过降级名单",
-                        onClick = {
-                            FakeSkipGuard.clearVetoApps()
+            AnimatedVisibility(visible = store.fakeSkipGuard) {
+                Column {
+                    // fork(fok0030): 事前树判据 —— 点之前先判"这个跳过文字是不是被广告层压住"。
+                    // ★ 为什么加它: 用户实测"真跳过(按钮不在右上角)反而被拦、广告不跳"。
+                    //   判据只看**覆盖关系**(那个点上有没有明显更大的可点层), 不看位置;
+                    //   判不准一律放行(判不准就点, 误拦优先避免)。
+                    TextSwitch(
+                        title = "事前识别假跳过(推荐)",
+                        subtitle = "点之前用无障碍树判断\"跳过\"下面有没有盖着广告层: 是就不点(免得点到广告); " +
+                            "拿不准时照点不误拦。关掉则只做事后落点校验",
+                        checked = store.fakeSkipJudgeEnabled,
+                        onClickLabel = "切换事前识别假跳过开关",
+                        onCheckedChange = {
+                            storeFlow.value = store.copy(
+                                fakeSkipJudgeEnabled = it
+                            )
                         })
+                    run {
+                        // 每次重组都重算(条目很少, 且带 24h 到期时间, 必须现算)
+                        val ruleLines = FakeSkipGuard.vetoRuleLines()
+                        AnimatedVisibility(visible = ruleLines.isNotEmpty()) {
+                            SettingItem(
+                                title = "已降级的规则组 (${ruleLines.size})",
+                                subtitle = "24 小时内不再自动点击这些规则里的不可点跳过文字(到期自动恢复): " +
+                                    ruleLines.take(2).joinToString("; ") +
+                                    (if (ruleLines.size > 2) " …" else "") +
+                                    " — 点击立即全部恢复",
+                                onClickLabel = "清空假跳过降级规则组",
+                                onClick = {
+                                    FakeSkipGuard.clearVetoRules()
+                                    toast("已恢复全部规则组")
+                                })
+                        }
+                    }
+                    run {
+                        // 老版(fok0029 及之前)的"整 App 降级"记录: 只显示 + 允许清空, 不再新增
+                        val legacy = FakeSkipGuard.vetoAppIds()
+                        AnimatedVisibility(visible = legacy.isNotEmpty()) {
+                            SettingItem(
+                                title = "老版整应用降级 (${legacy.size})",
+                                subtitle = "这些是老版本(fok0029 及之前)拉黑的整个应用, 点它会停止该应用**所有**跳过; " +
+                                    "点击清空恢复 —— 新版本只按规则组降级, 不会再产生这里的条目",
+                                onClickLabel = "清空老版整应用降级名单",
+                                onClick = {
+                                    FakeSkipGuard.clearVetoApps()
+                                    toast("已清空老版整应用降级名单")
+                                })
+                        }
+                    }
                 }
             }
 
@@ -609,6 +648,25 @@ fun useSettingsPage(): ScaffoldExt {
                     onClickLabel = "进入快应用引擎页",
                     onClick = {
                         mainVm.navigatePage(QuickAppEngineRoute)
+                    })
+            }
+
+            // fork(fok0030): 「卸载清理」入口 —— 放在「关闭快应用」下面, 因为上面这一页会改**系统级状态**
+            // (pm disable-user 停用引擎 / appops 禁止安装), 而这些改动在 App 被卸载之后**无法自愈**,
+            // 卸载前必须能在同一个地方看到并还原。
+            run {
+                val ledger by UninstallCleaner.uninstallLedgerFlow.collectAsState()
+                val pending = ledger.entries.count { !it.restored }
+                SettingItem(
+                    title = "卸载清理",
+                    subtitle = if (pending == 0) {
+                        "卸载前先看/清掉系统里留下的痕迹(控制中心磁贴、权限记录、无障碍、被停用的快应用引擎), 点击进入"
+                    } else {
+                        "台账里有 $pending 条本应用改过的系统状态(卸载后会一直留着), 点击查看/还原"
+                    },
+                    onClickLabel = "进入卸载清理页面",
+                    onClick = {
+                        mainVm.navigatePage(UninstallCleanupRoute)
                     })
             }
 

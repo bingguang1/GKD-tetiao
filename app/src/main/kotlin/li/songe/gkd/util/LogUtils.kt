@@ -44,7 +44,18 @@ object LogUtils {
 }
 
 private val logFileExecutor = Executors.newSingleThreadExecutor()
-private const val MAX_LOG_KEEP_DAYS = 7
+
+/** 日志文件的默认保留天数(设置项 `logRetainDays` 没读到时的兜底) */
+private const val DEFAULT_LOG_KEEP_DAYS = 7
+
+/**
+ * fork(fok0030): 保留天数改为**用户可配**(设置 → 高级设置 → 日志 → 日志保留天数, 1/3/7/14/30 天, 默认 7)。
+ * 这里在每次"开新文件"时读一次 store —— 用户改完设置不用重启 App 就生效。
+ */
+private fun logKeepDays(): Int =
+    runCatching { li.songe.gkd.store.storeFlow.value.logRetainDays }
+        .getOrDefault(DEFAULT_LOG_KEEP_DAYS)
+        .coerceIn(1, 30)
 val deviceInfoDesc by lazy {
     listOf(
         android.os.Build.MANUFACTURER,
@@ -66,10 +77,11 @@ private fun logToFile(tag: String, name: String, loc: String, texts: List<String
     val file = logFolder.resolve("gkd-${t.format("yyyyMMdd")}.log")
     val sb = StringBuilder()
     if (!file.exists()) {
+        val keepDays = logKeepDays()
         val files = logFolder.listFiles()
-        if (files != null && files.size >= MAX_LOG_KEEP_DAYS) {
+        if (files != null && files.size >= keepDays) {
             files.forEach {
-                if (t - it.lastModified() > MAX_LOG_KEEP_DAYS.days.inWholeMilliseconds) {
+                if (t - it.lastModified() > keepDays.days.inWholeMilliseconds) {
                     it.delete()
                 }
             }
